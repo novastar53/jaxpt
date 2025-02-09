@@ -1,10 +1,12 @@
 import jax
+import optax
 import jax.numpy as jnp
 from flax import nnx
 
 
 import dataloaders as dl
 from models import BigramLanguageModel
+from train import train_step
 
 BATCH_SIZE = 4 # How many independent sequences will we process in parallel?
 BLOCK_SIZE = 8 # What is the maximum context length for predictions?
@@ -24,14 +26,26 @@ def main():
 
     xb, yb = dl.get_batch(key, train_data, BATCH_SIZE, BLOCK_SIZE)
 
-    m =  BigramLanguageModel(rngs, vocab_size=vocab_size)
-
-    logits, loss = m(xb, yb)
+    m =  BigramLanguageModel(vocab_size, rngs)
 
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), max_new_tokens=100)[0].tolist()
     out = decode(out)
     print(out)
 
+    # Train the model
+    batch_size = 32
+    optimizer = nnx.Optimizer(m, optax.adam(1e-2))
+
+    for steps in range(10000):
+        key = jax.random.split(key)[0]
+        xb, yb = dl.get_batch(key, train_data, batch_size, BLOCK_SIZE)
+        loss = train_step(m, optimizer, xb, yb)
+
+    print(loss)
+
+    out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), max_new_tokens=100)[0].tolist()
+    out = decode(out)
+    print(out)
 
 if __name__ == "__main__":
     main()
