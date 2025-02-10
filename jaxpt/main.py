@@ -5,7 +5,7 @@ from flax import nnx
 
 
 import dataloaders as dl
-from models import BigramLanguageModel
+from models import Bigram, BasicTransformer
 from train import train_step
 
 BATCH_SIZE = 4 # How many independent sequences will we process in parallel?
@@ -26,23 +26,28 @@ def main():
 
     xb, yb = dl.get_batch(key, train_data, BATCH_SIZE, BLOCK_SIZE)
 
-    m =  BigramLanguageModel(vocab_size, rngs)
+    m =  BasicTransformer(vocab_size, 32, rngs)
 
+    # Generate sample text
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), max_new_tokens=100)[0].tolist()
     out = decode(out)
     print(out)
 
+    #return
+
     # Train the model
+    
     batch_size = 32
     optimizer = nnx.Optimizer(m, optax.adam(1e-2))
 
-    for steps in range(10000):
+    for steps in range(2000):
         key = jax.random.split(key)[0]
         xb, yb = dl.get_batch(key, train_data, batch_size, BLOCK_SIZE)
         loss = train_step(m, optimizer, xb, yb)
 
     print(loss)
 
+    # Generate sample text 
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), max_new_tokens=100)[0].tolist()
     out = decode(out)
     print(out)
