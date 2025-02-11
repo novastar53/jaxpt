@@ -8,7 +8,6 @@ import dataloaders as dl
 from models import Bigram, BasicTransformer
 from train import train_step
 
-BATCH_SIZE = 4 # How many independent sequences will we process in parallel?
 BLOCK_SIZE = 8 # What is the maximum context length for predictions?
 
 def main():
@@ -22,31 +21,32 @@ def main():
     val_data = data[n:]
 
     key = jax.random.PRNGKey(1337)    
-    rngs = nnx.Rngs({"dataloader": key, "params": key, "generate": key})
-
-    xb, yb = dl.get_batch(key, train_data, BATCH_SIZE, BLOCK_SIZE)
+    rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
 
     features = 32
-    head_size = 32
-    m =  BasicTransformer(vocab_size, features, head_size, BLOCK_SIZE, rngs)
+    num_heads = 4
+    num_blocks = 3
+    m = BasicTransformer(vocab_size, features, num_heads, num_blocks, BLOCK_SIZE, rngs)
 
     # Generate sample text
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
     out = decode(out)
     print(out)
 
-    #return
-
     # Train the model
     
     batch_size = 32
-    optimizer = nnx.Optimizer(m, optax.adam(1e-2))
+    optimizer = nnx.Optimizer(m, optax.adam(1e-3))
 
-    for steps in range(100):
+    valid_xb, valid_yb = dl.get_batch(key, val_data, len(val_data), BLOCK_SIZE)
+
+    for steps in range(5000):
         key = jax.random.split(key)[0]
         xb, yb = dl.get_batch(key, train_data, batch_size, BLOCK_SIZE)
-        loss = train_step(m, optimizer, xb, yb)
-        print(loss)
+        train_loss = train_step(m, optimizer, xb, yb)
+        valid_loss = train_step(m, optimizer, valid_xb, valid_yb)
+        if steps % 20 == 0:
+            print(f"step {steps}: train loss {train_loss:.4f} valid loss {valid_loss:.4f}")
 
     # Generate sample text 
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
