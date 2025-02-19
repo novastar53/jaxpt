@@ -5,10 +5,10 @@ from flax import nnx
 
 
 import dataloaders as dl
-from models import Bigram, BasicTransformer
+from models import Bigram, Charformer, GPT2, GPTConfig
 from train import train_step
 
-BLOCK_SIZE = 8 # What is the maximum context length for predictions?
+BLOCK_SIZE = 8 
 
 def main():
 
@@ -26,7 +26,9 @@ def main():
     features = 32
     num_heads = 4
     num_blocks = 3
-    m = BasicTransformer(vocab_size, features, num_heads, num_blocks, BLOCK_SIZE, rngs)
+    m = GPT2(GPTConfig(), rngs)
+
+    return
 
     # Generate sample text
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
