@@ -7,6 +7,7 @@ from flax import nnx
 import dataloaders as dl
 from models import Bigram, Charformer, GPT2, GPTConfig
 from train import train_step
+from utils import count_params, list_params
 
 BLOCK_SIZE = 8 
 
@@ -26,7 +27,13 @@ def main():
     features = 32
     num_heads = 4
     num_blocks = 3
-    m = GPT2(GPTConfig(), rngs)
+    m = GPT2.from_pretrained(rngs)
+
+    _, state = nnx.split(m)
+
+    print(count_params(state))
+
+
 
     return
 

@@ -1,16 +1,60 @@
 from dataclasses import dataclass
+
+import torch
 import jax
+import jax.numpy as jnp
 import flax.nnx as nnx
+
+from transformers import GPT2LMHeadModel
+
+from utils import count_params, update_param
 
 
 @dataclass
 class GPTConfig:
-    block_size: int = 256
-    vocab_size: int = 50257
-    n_layer: int = 6
-    n_head: int = 6
-    n_embed: int = 384
+    block_size: int = 1024 # sequence length
+    vocab_size: int = 50257 # tiktoken bpe encoded text
+    n_layer: int = 12 # number of attention blocks 
+    n_head: int = 12 # number of attention heads
+    n_embed: int = 768 # number token embedding dimensions
 
+
+class CausalSelfAttention(nnx.Module):
+
+
+    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+        self.c_attn = nnx.Linear(config.n_embed, 3 * config.n_embed, rngs=rngs)
+        self.c_proj = nnx.Linear(config.n_embed, config.n_embed, rngs=rngs)
+        self.n_head = config.n_head
+        self.n_embed = config.n_embed
+        self.mask = nnx.Variable(jnp.tril(jnp.ones((config.block_size, config.block_size)) \
+                        .reshape((1, 1, config.block_size, config.block_size)))) 
+
+    def __call__(self, x):
+        B, T, C = x.shape
+        qkv = self.c_attn(x) # B, T, 3 * C
+        q, k, v = jnp.split(qkv, 3, axis=-1) # 3 * (B, T, C)
+
+        k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
+        k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+
+        q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
+        q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+
+        v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
+        v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+
+        # (B, n_head, T, hs) x (B, n_head, hs, T) -> (B, n_head, T, T)
+        att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1]) 
+        att = jnp.where(self.mask == 0, float('-inf'), att)
+        att = jax.nn.softmax(att, axis=-1)
+
+        y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
+        y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+        y = jnp.reshape(y, (B, T, C)) # (B, T, C)
+        y = self.c_proj(y)
+        return y
+        
 
 class MLP(nnx.Module):
 
@@ -29,7 +73,7 @@ class Block(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(config.n_embed, rngs=rngs)
-        #self.attn = CausalSelfAttention(config, rngs=rngs)
+        self.attn = CausalSelfAttention(config, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(config.n_embed, rngs=rngs)
         self.mlp = MLP(config, rngs=rngs)
     
@@ -51,18 +95,77 @@ class Transformer(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.wte = nnx.Embed(config.vocab_size, config.n_embed, rngs=rngs)
         self.wpe = nnx.Embed(config.block_size, config.n_embed, rngs=rngs)  
-        #self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
+        self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(config.n_embed, rngs=rngs)
 
+    
+    def __call__(self, idx):
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
+        pos_emb = self.transformer.wpe(pos)
+        tok_emb = self.transformer.wte(idx)
+        x = tok_emb + pos_emb
+        for block in self.h:
+            x = block(x)
+        x = self.ln_f(x)
+        return x
+        
 
 class GPT2(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.transformer = Transformer(config, rngs=rngs)
-        self.lm_head = nnx.Linear(config.n_embed, config.vocab_size, rngs=rngs, use_bias=False)
+        self.lm_head = nnx.Linear(config.n_embed, config.vocab_size, rngs=rngs, 
+                                  use_bias=False)
+
+    
+    def __call__(self, idx):
+
+        B, T = idx.shape()
+        assert T <= self.config.block_size
+        x = self.transformer(idx)
+        logits = self.lm_head(x)
+        return logits
 
 
+    @classmethod
+    def from_pretrained(cls, rngs: nnx.Rngs):
 
+        config = GPTConfig()
+        model = GPT2(config, rngs)
+        graphdef, sd = nnx.split(model)
+
+        model_hf = GPT2LMHeadModel.from_pretrained('gpt2')
+        sd_hf = model_hf.state_dict()
+
+        #keys = [k for k in sd_hf if not k.endswith('attn.masked_bias')] # ignore these
+        hf_keys = [k for k in sd_hf] 
+        transposed = ['lm_head.weight']
+
+        print(f"hf_keys: {len(sd_hf)} | jax_keys: {count_params(sd)}")
+        assert len(sd_hf) == count_params(sd)
+
+        for k in hf_keys:
+            # map pytorch keys to flax keys
+            if "wte" in k or "wpe" in k:
+                jax_k = k.replace("weight", "embedding")
+            elif "ln_" in k:
+                jax_k = k.replace("weight", "scale")
+            else:
+                jax_k = k.replace("weight", "kernel")
+            print(k, jax_k)
+            with torch.no_grad():
+                hf_param = sd_hf[k].detach().cpu().numpy()
+                if any(k.endswith(w) for w in transposed):
+                    # special treatment for the Conv1D weights we need to transpose
+                    sd = update_param(sd, jax_k, jnp.array(hf_param.T))
+
+                else:
+                    # vanilla copy over the other parameters
+                    sd = update_param(sd, jax_k, jnp.array(hf_param))
+                    
+        model = nnx.merge(graphdef, sd)
+
+        return model
     
 
