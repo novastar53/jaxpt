@@ -15,7 +15,7 @@ BLOCK_SIZE = 8
 def run_gpt2():
 
     num_return_sequences = 5
-    max_length = 50
+    max_length = 20
     
     key = jax.random.PRNGKey(1337)    
     rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
@@ -27,7 +27,7 @@ def run_gpt2():
     import tiktoken
 
     enc = tiktoken.get_encoding('gpt2')
-    tokens = enc.encode("Hello, I'm a language model,")
+    tokens = enc.encode("I am a")
     tokens = jnp.array(tokens, dtype=jnp.int32) # (8,)
     tokens = jnp.expand_dims(tokens, axis=0)
     x = jnp.tile(tokens, (num_return_sequences, 1)) # (5, 8)
@@ -36,18 +36,12 @@ def run_gpt2():
         logits = m(x) 
         logits = logits[:, -1, :] # (B, vocab_size)
         probs = jax.nn.softmax(logits, axis=-1)    
-        #print(probs.shape)
         topk_probs, topk_indices = jax.lax.top_k(probs, 50)
-        #print(topk_probs.shape, topk_indices.shape)
-        #print(topk_probs.shape)
         key, _ = jax.random.split(key)
         ix = jax.random.categorical(key, jnp.log(topk_probs), shape=(topk_probs.shape[0],)) # (B, 1)
         ix = ix.reshape(ix.shape[0], 1)
-        #print(ix, ix.shape)
-        #xcol = jnp.take_along_axis(topk_indices, ix, axis=-1)
-        #print(x.shape)
-        x = jnp.concatenate((x, ix), axis=1) # (B, T+1)
-        #print(x.shape)
+        xcol = jnp.take_along_axis(topk_indices, ix, axis=-1)
+        x = jnp.concatenate((x, xcol), axis=1) # (B, T+1)
 
     for i in range(num_return_sequences):
         tokens = x[i, :max_length].tolist()

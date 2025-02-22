@@ -159,6 +159,7 @@ class GPT2(nnx.Module):
             print(k, jax_k)
             with torch.no_grad():
                 hf_param = sd_hf[k].detach().cpu().numpy()
+                jax_param = get_param(sd, jax_k).value
                 if any(k.endswith(w) for w in transposed):
                     # special treatment for the Conv1D weights we need to transpose
                     sd = update_param(sd, jax_k, jnp.array(hf_param.T))
@@ -170,6 +171,7 @@ class GPT2(nnx.Module):
                     # check that the value was copied correctly
                     test_param = get_param(sd, jax_k)
                     assert(jnp.sum(test_param.value) == jnp.sum(hf_param))
+                    assert(jnp.sum(test_param.value) != jnp.sum(jax_param))
                     model = nnx.merge(graphdef, sd)
 
         return model
