@@ -15,7 +15,7 @@ def get_param(state: nnx.statelib.State, path: str) -> nnx.variablelib.VariableS
     return param
 
 
-def update_param(state: nnx.statelib.State, path: str, value: numpy.array)  \
+def update_param(state: nnx.statelib.State, path: str, value: jnp.array)  \
                         ->  nnx.variablelib.VariableState:
 
     param = get_param(state, path)
@@ -39,7 +39,9 @@ def list_params(state: nnx.statelib.State) ->  list[str]:
             for k in item_val.keys():
                 stack.append((k, f"{item_path}.{k}", item_val[k]))
         elif type(item_val) == nnx.variablelib.VariableState:
-                if item_val.type != nnx.Variable and item_val.value is not None:
+                if (item_val.type != nnx.Variable) \
+                 and (item_val.value is not None) \
+                 and ("dropout" not in item_path):
                     params.append(item_path)
     
     return params

@@ -26,7 +26,6 @@ class Bigram(nnx.Module):
             probs = nnx.softmax(logits, axis=-1) # (B, C)
             idx_next = jax.random.categorical(key, jnp.log(probs), shape=(probs.shape[0], 1)) # (B, 1)
             idx = jnp.concatenate((idx, idx_next), axis=1) # (B, T+1)
-            idx_next = jax.random.categorical(key, jnp.log(probs), shape=(probs.shape[0], 1)) # (B, 1)
         
         return idx
 

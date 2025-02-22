@@ -8,7 +8,7 @@ import flax.nnx as nnx
 
 from transformers import GPT2LMHeadModel
 
-from utils import count_params, update_param, get_param
+from utils import count_params, update_param, get_param, list_params
 
 
 @dataclass
@@ -17,7 +17,10 @@ class GPTConfig:
     vocab_size: int = 50257 # tiktoken bpe encoded text
     n_layer: int = 12 # number of attention blocks 
     n_head: int = 12 # number of attention heads
-    n_embed: int = 768 # number token embedding dimensions
+    n_embed: int = 768 # number token embedding dimensionsa
+    attn_pdrop: float = 0.1 
+    resid_pdrop: float = 0.1
+    embd_pdrop: float = 0.1
 
 
 class CausalSelfAttention(nnx.Module):
@@ -30,6 +33,8 @@ class CausalSelfAttention(nnx.Module):
         self.n_embed = config.n_embed
         self.mask = nnx.Variable(jnp.tril(jnp.ones((config.block_size, config.block_size)) \
                         .reshape((1, 1, config.block_size, config.block_size)))) 
+        self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
+        self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -47,13 +52,18 @@ class CausalSelfAttention(nnx.Module):
 
         # (B, n_head, T, hs) x (B, n_head, hs, T) -> (B, n_head, T, T)
         att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1]) 
-        att = jnp.where(self.mask == 0, float('-inf'), att)
+        #print(att.shape)
+        #print(self.mask[:, :, :T, :T].shape)
+        #print(self.mask)
+        att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
+        #return att
         att = jax.nn.softmax(att, axis=-1)
+        att = self.attn_dropout(att)
 
         y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
         y = jnp.reshape(y, (B, T, C)) # (B, T, C)
-        y = self.c_proj(y)
+        y = self.resid_dropout(self.c_proj(y))
         return y
         
 
@@ -62,11 +72,13 @@ class MLP(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(config.n_embed, 4 * config.n_embed, rngs=rngs)
         self.c_proj = nnx.Linear(4 * config.n_embed, config.n_embed, rngs=rngs)
+        self.dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
 
     def __call__(self, x):
         x = self.c_fc(x)
         x = nnx.gelu(x, approximate=True)
         x = self.c_proj(x)
+        x = self.dropout(x)
         return x
 
 
@@ -96,7 +108,8 @@ class Transformer(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(config.vocab_size, config.n_embed, rngs=rngs)
-        self.wpe = nnx.Embed(config.block_size, config.n_embed, rngs=rngs)  
+        self.wpe = nnx.Embed(config.block_size, config.n_embed, rngs=rngs)
+        self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)  
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(config.n_embed, rngs=rngs)
 
@@ -106,7 +119,7 @@ class Transformer(nnx.Module):
         pos = jnp.arange(0, T, dtype=jnp.int32)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
-        x = tok_emb + pos_emb
+        x = self.dropout(tok_emb + pos_emb)
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
@@ -123,7 +136,6 @@ class GPT2(nnx.Module):
 
     
     def __call__(self, idx):
-
         B, T = idx.shape
         assert T <= self.config.block_size
         x = self.transformer(idx)
@@ -137,6 +149,7 @@ class GPT2(nnx.Module):
         config = GPTConfig()
         model = GPT2(config, rngs)
         graphdef, sd = nnx.split(model)
+        params = list_params(sd)
 
         model_hf = GPT2LMHeadModel.from_pretrained('gpt2')
         sd_hf = model_hf.state_dict()
@@ -145,7 +158,6 @@ class GPT2(nnx.Module):
         hf_keys = [k for k in sd_hf] 
         transposed = ['lm_head.weight']
 
-        print(f"hf_keys: {len(sd_hf)} | jax_keys: {count_params(sd)}")
         assert len(sd_hf) == count_params(sd)
 
         for k in hf_keys:
@@ -156,24 +168,27 @@ class GPT2(nnx.Module):
                 jax_k = k.replace("weight", "scale")
             else:
                 jax_k = k.replace("weight", "kernel")
-            print(k, jax_k)
             with torch.no_grad():
                 hf_param = sd_hf[k].detach().cpu().numpy()
                 jax_param = get_param(sd, jax_k).value
                 if any(k.endswith(w) for w in transposed):
                     # special treatment for the Conv1D weights we need to transpose
-                    sd = update_param(sd, jax_k, jnp.array(hf_param.T))
+                    sd = update_param(sd, jax_k, jnp.array(hf_param).T)
+                    # check that the value was copied correctly
+                    test_param = get_param(sd, jax_k).value
+                    assert(jnp.sum(test_param) == jnp.sum(hf_param.T))
+                    assert(jnp.sum(test_param) != jnp.sum(jax_param))
+                    model = nnx.merge(graphdef, sd)
 
                 else:
                     # vanilla copy over the other parameters
                     sd = update_param(sd, jax_k, jnp.array(hf_param))
-
                     # check that the value was copied correctly
                     test_param = get_param(sd, jax_k)
                     assert(jnp.sum(test_param.value) == jnp.sum(hf_param))
                     assert(jnp.sum(test_param.value) != jnp.sum(jax_param))
                     model = nnx.merge(graphdef, sd)
 
-        return model
+        return model, model_hf
     
 
