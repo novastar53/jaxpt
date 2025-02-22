@@ -125,11 +125,11 @@ def run_hf_gpt2():
 
 def run_gpt2():
 
-    max_length = 20
+    max_length = 50
     num_return_sequences = 5
     temperature = 0.7
     top_k = 50
-    prompt = "Once upon a time,"
+    prompt = "The capital of India is"
     
     key = jax.random.PRNGKey(0)    
     rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
