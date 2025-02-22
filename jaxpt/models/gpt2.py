@@ -50,13 +50,8 @@ class CausalSelfAttention(nnx.Module):
         v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
         v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
-        # (B, n_head, T, hs) x (B, n_head, hs, T) -> (B, n_head, T, T)
         att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1]) 
-        #print(att.shape)
-        #print(self.mask[:, :, :T, :T].shape)
-        #print(self.mask)
         att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
-        #return att
         att = jax.nn.softmax(att, axis=-1)
         att = self.attn_dropout(att)
 
@@ -154,7 +149,6 @@ class GPT2(nnx.Module):
         model_hf = GPT2LMHeadModel.from_pretrained('gpt2')
         sd_hf = model_hf.state_dict()
 
-        #keys = [k for k in sd_hf if not k.endswith('attn.masked_bias')] # ignore these
         hf_keys = [k for k in sd_hf] 
         transposed = ['lm_head.weight']
 
