@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 import torch
 import jax
@@ -7,7 +8,7 @@ import flax.nnx as nnx
 
 from transformers import GPT2LMHeadModel
 
-from utils import count_params, update_param
+from utils import count_params, update_param, get_param
 
 
 @dataclass
@@ -64,7 +65,7 @@ class MLP(nnx.Module):
 
     def __call__(self, x):
         x = self.c_fc(x)
-        x = flax.nnx.gelu(x, approximate=True)
+        x = nnx.gelu(x, approximate=True)
         x = self.c_proj(x)
         return x
 
@@ -93,6 +94,7 @@ class Block(nnx.Module):
 class Transformer(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+        self.config = config
         self.wte = nnx.Embed(config.vocab_size, config.n_embed, rngs=rngs)
         self.wpe = nnx.Embed(config.block_size, config.n_embed, rngs=rngs)  
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
@@ -100,9 +102,10 @@ class Transformer(nnx.Module):
 
     
     def __call__(self, idx):
-        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
-        pos_emb = self.transformer.wpe(pos)
-        tok_emb = self.transformer.wte(idx)
+        B, T = idx.shape
+        pos = jnp.arange(0, T, dtype=jnp.int32)
+        pos_emb = self.wpe(pos)
+        tok_emb = self.wte(idx)
         x = tok_emb + pos_emb
         for block in self.h:
             x = block(x)
@@ -121,7 +124,7 @@ class GPT2(nnx.Module):
     
     def __call__(self, idx):
 
-        B, T = idx.shape()
+        B, T = idx.shape
         assert T <= self.config.block_size
         x = self.transformer(idx)
         logits = self.lm_head(x)
@@ -163,8 +166,11 @@ class GPT2(nnx.Module):
                 else:
                     # vanilla copy over the other parameters
                     sd = update_param(sd, jax_k, jnp.array(hf_param))
-                    
-        model = nnx.merge(graphdef, sd)
+
+                    # check that the value was copied correctly
+                    test_param = get_param(sd, jax_k)
+                    assert(jnp.sum(test_param.value) == jnp.sum(hf_param))
+                    model = nnx.merge(graphdef, sd)
 
         return model
     

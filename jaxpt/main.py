@@ -11,7 +11,52 @@ from utils import count_params, list_params
 
 BLOCK_SIZE = 8 
 
-def main():
+
+def run_gpt2():
+
+    num_return_sequences = 5
+    max_length = 50
+    
+    key = jax.random.PRNGKey(1337)    
+    rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
+    m = GPT2.from_pretrained(rngs)
+
+    _, state = nnx.split(m)
+    print(count_params(state))
+
+    import tiktoken
+
+    enc = tiktoken.get_encoding('gpt2')
+    tokens = enc.encode("Hello, I'm a language model,")
+    tokens = jnp.array(tokens, dtype=jnp.int32) # (8,)
+    tokens = jnp.expand_dims(tokens, axis=0)
+    x = jnp.tile(tokens, (num_return_sequences, 1)) # (5, 8)
+
+    while x.shape[1] < max_length: 
+        logits = m(x) 
+        logits = logits[:, -1, :] # (B, vocab_size)
+        probs = jax.nn.softmax(logits, axis=-1)    
+        #print(probs.shape)
+        topk_probs, topk_indices = jax.lax.top_k(probs, 50)
+        #print(topk_probs.shape, topk_indices.shape)
+        #print(topk_probs.shape)
+        key, _ = jax.random.split(key)
+        ix = jax.random.categorical(key, jnp.log(topk_probs), shape=(topk_probs.shape[0],)) # (B, 1)
+        ix = ix.reshape(ix.shape[0], 1)
+        #print(ix, ix.shape)
+        #xcol = jnp.take_along_axis(topk_indices, ix, axis=-1)
+        #print(x.shape)
+        x = jnp.concatenate((x, ix), axis=1) # (B, T+1)
+        #print(x.shape)
+
+    for i in range(num_return_sequences):
+        tokens = x[i, :max_length].tolist()
+        decoded = enc.decode(tokens)
+        print(">", decoded)
+
+
+
+def run_charformer():
 
     text = dl.load_text("datasets/panchatantra-ryder.txt")
     encode, decode, vocab_size = dl.get_encoder_decoder(text)
@@ -27,15 +72,7 @@ def main():
     features = 32
     num_heads = 4
     num_blocks = 3
-    m = GPT2.from_pretrained(rngs)
-
-    _, state = nnx.split(m)
-
-    print(count_params(state))
-
-
-
-    return
+    m = Charformer(vocab_size, features, num_heads, num_blocks, BLOCK_SIZE, rngs)
 
     # Generate sample text
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
@@ -63,4 +100,4 @@ def main():
     print(out)
 
 if __name__ == "__main__":
-    main()
+    run_gpt2()
