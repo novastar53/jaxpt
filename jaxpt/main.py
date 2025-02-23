@@ -165,22 +165,22 @@ def run_gpt2():
 
     # Load the dataset
     text = dl.load_text("datasets/panchatantra-ryder.txt")
-    print(text)
-    text = text[:1000]
-    tokens = enc.encode(text)
-    print(len(tokens))
-    B, T = 4, 32
-    buf = jnp.array(tokens[:B*T + 1])
-    print(buf.shape)
-    x = buf[:-1].reshape(B, T)
-    y = buf[1:].reshape(B, T)
+    data = enc.encode(text)
 
     # Train the model
+    n_iter = 10
+    B, T = 4, 32
+
     m.train()
     optimizer = nnx.Optimizer(m, optax.adam(1e-3))
-    loss = train_step(m, optimizer, x, y)
-    print(f"Loss: {loss:0.4f}")
 
+    for i in range(n_iter):
+        buffer = data[i*B*T:(i+1)*B*T+1]
+        assert(len(buffer) == B*T+1)
+        x_batch = jnp.array(buffer[:-1]).reshape((B, T))
+        y_batch = jnp.array(buffer[1:]).reshape((B, T))
+        loss = train_step(m, optimizer, x_batch, y_batch)
+        print(f"Loss: {loss:0.4f}")
 
 
 def run_charformer():
@@ -226,4 +226,4 @@ def run_charformer():
     print(out)
 
 if __name__ == "__main__":
-    run_charformer()
+    run_gpt2()
