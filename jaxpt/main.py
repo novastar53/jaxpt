@@ -11,20 +11,10 @@ from transformers import GPT2LMHeadModel
 import dataloaders as dl
 from models import Bigram, Charformer, GPT2, GPTConfig, KGPT
 from train import train_step
+from infer import generate_completion, top_k_sampling
 from utils import count_params, list_params, get_param
 
 BLOCK_SIZE = 8 
-
-def top_k_sampling(logits, key, k=50):
-    """
-    Apply top-k sampling to the logits distribution.
-    """
-    top_k_indices = jnp.argsort(logits, axis=-1)[..., -k:]
-    top_k_logits = jnp.take_along_axis(logits, top_k_indices, axis=-1)
-    probabilities = jax.nn.softmax(top_k_logits, axis=-1)
-    key, subkey = jax.random.split(key)
-    sampled_index = jax.random.categorical(subkey, probabilities)
-    return jnp.take_along_axis(top_k_indices, sampled_index[..., None], axis=-1).squeeze(-1), key
 
 
 def compare_gpts():
@@ -133,55 +123,36 @@ def run_gpt2():
     'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
     }
 
-    max_length = 50
-    num_return_sequences = 5
-    temperature = 0.7
-    top_k = 50
-    prompt = "One inch is equal to"
     
     key = jax.random.PRNGKey(0)    
     rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
     #m, _ = GPT2.from_pretrained(rngs)
     m = GPT2(GPTConfig(), rngs)
-    m.eval()
-    enc = tiktoken.get_encoding('gpt2')
-    tokens = enc.encode(prompt)
-    tokens = jnp.array(tokens, dtype=jnp.int32) 
-    tokens = jnp.expand_dims(tokens, axis=0)
-    x = jnp.tile(tokens, (num_return_sequences, 1)) 
-
-    # Generate sample text
-    while x.shape[1] < max_length: 
-        logits = m(x) 
-        logits = logits[:, -1, :] / temperature # (B, vocab_size)
-        x_next, key = top_k_sampling(logits, key, k=top_k)
-        x_next = x_next.reshape(x_next.shape[0], 1)
-        x = jnp.concatenate((x, x_next), axis=1) # (B, T+1)
-
-    for i in range(num_return_sequences):
-        tokens = x[i, :max_length].tolist()
-        decoded = enc.decode(tokens)
-        print(">", decoded)
+    generate_completion(m, "Once upon a time,")
 
     # Load the dataset
+    enc = tiktoken.get_encoding('gpt2')
     text = dl.load_text("datasets/panchatantra-ryder.txt")
     data = enc.encode(text)
+    print(len(data))
 
     # Train the model
-    n_iter = 10
+    n_epochs = 1
     B, T = 4, 32
 
     m.train()
-    optimizer = nnx.Optimizer(m, optax.adam(1e-3))
+    optimizer = nnx.Optimizer(m, optax.adamw(3e-4))
 
-    for i in range(n_iter):
-        buffer = data[i*B*T:(i+1)*B*T+1]
-        assert(len(buffer) == B*T+1)
-        x_batch = jnp.array(buffer[:-1]).reshape((B, T))
-        y_batch = jnp.array(buffer[1:]).reshape((B, T))
-        loss = train_step(m, optimizer, x_batch, y_batch)
-        print(f"Loss: {loss:0.4f}")
+    for e in range(1):
+        for i in range(len(data) // (B*T)):
+            buffer = data[i*B*T:(i+1)*B*T+1]
+            assert(len(buffer) == B*T+1)
+            x_batch = jnp.array(buffer[:-1]).reshape((B, T))
+            y_batch = jnp.array(buffer[1:]).reshape((B, T))
+            loss = train_step(m, optimizer, x_batch, y_batch)
+            print(f"Iter: {i}, Loss: {loss:0.4f}")
 
+    generate_completion(m, "Once upon a time,")
 
 def run_charformer():
 

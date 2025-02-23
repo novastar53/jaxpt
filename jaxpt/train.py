@@ -18,4 +18,3 @@ def train_step(model, optimizer, batch, targets):
     optimizer.update(grads)
     return loss
 
-

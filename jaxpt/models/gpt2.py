@@ -128,6 +128,9 @@ class GPT2(nnx.Module):
         self.transformer = Transformer(config, rngs=rngs)
         self.lm_head = nnx.Linear(config.n_embed, config.vocab_size, rngs=rngs, 
                                   use_bias=False)
+        
+        # weight sharing scheme
+        self.transformer.wte.kernel = self.lm_head.kernel
 
     
     def __call__(self, idx):
