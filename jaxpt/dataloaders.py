@@ -3,6 +3,7 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 
+import tiktoken
 
 
 def load_text(path):
@@ -10,29 +11,43 @@ def load_text(path):
         text = f.read()
     return text
 
+class GPTLoader:
+    def __init__(self, text: str):
+        self.text = text
+        self.chars = sorted(list(set(text)))
+        self.vocab_size = len(self.chars)
 
-def get_encoder_decoder(text) -> tuple[Callable, Callable]:
+    def encode_text(self, text) -> jax.Array:
+        data = jnp.array(self.encode(text), dtype=jnp.int32)
+        return data
 
-    chars = sorted(list(set(text)))
-    vocab_size = len(chars)
-    stoi = {ch: i for i, ch in enumerate(chars)}
-    itos = {i: ch for i, ch in enumerate(chars)}
-
-    encode = lambda s: [ stoi[c] for c in s ]
-    decode = lambda l: ''.join(itos[i] for i in l)
-
-    return encode, decode, vocab_size
-
-
-def encode_text(text, encode) -> jax.Array:
-
-    data = jnp.array(encode(text), dtype=jnp.int32)
-    return data
+    def get_batch(self, key, data: jax.Array, batch_size, block_size):
+        ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
+        x = jnp.stack([data[i:i+block_size] for i in ix])
+        y = jnp.stack([data[i+1:i+block_size+1] for i in ix])
+        return x, y 
 
 
-def get_batch(key, data, batch_size, block_size):
+class CharLoader:
 
-    ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
-    x = jnp.stack([data[i:i+block_size] for i in ix])
-    y = jnp.stack([data[i+1:i+block_size+1] for i in ix])
-    return x, y 
+    def __init__(self, text: str):
+        self.text = text
+        self.chars = sorted(list(set(text)))
+        self.vocab_size = len(self.chars)
+        self.stoi = {ch: i for i, ch in enumerate(self.chars)}
+        self.itos = {i: ch for i, ch in enumerate(self.chars)}
+        self.encode = lambda s: [ self.stoi[c] for c in s ]
+        self.decode = lambda l: ''.join(self.itos[i] for i in l)
+
+    def get_encoder_decoder(self, text) -> tuple[Callable, Callable]:
+        return self.encode, self.decode, self.vocab_size
+
+    def encode_text(self, text) -> jax.Array:
+        data = jnp.array(self.encode(text), dtype=jnp.int32)
+        return data
+
+    def get_batch(self, key, data: jax.Array, batch_size, block_size):
+        ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
+        x = jnp.stack([data[i:i+block_size] for i in ix])
+        y = jnp.stack([data[i+1:i+block_size+1] for i in ix])
+        return x, y 

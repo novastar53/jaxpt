@@ -29,6 +29,7 @@ def top_k_sampling(logits, key, k=50):
 
 def compare_gpts():
 
+
     kgpt = KGPT.from_pretrained("gpt2")
     kgpt.eval()
     kgpt_params = kgpt.state_dict()
@@ -45,15 +46,16 @@ def compare_gpts():
     kgpt_param = kgpt_params['lm_head.weight']
     param = get_param(state, 'lm_head.kernel').value
     print(kgpt_param.shape, param.shape)
+    print(kgpt_param)
     print(torch.sum(kgpt_param), jnp.sum(param))
 
-    kgpt_x = kgpt(torch.tensor([[0,0,0]]))
-    print(kgpt_x.shape)
-    print(kgpt_x)
+    #kgpt_x = kgpt(torch.tensor([[0,0,0]]))
+    #print(kgpt_x.shape)
+    #print(kgpt_x)
 
-    x = m(jnp.array([[0,0,0]]))
-    print(x.shape)
-    print(x)
+    #x = m(jnp.array([[0,0,0]]))
+    #print(x.shape)
+    #print(x)
 
 
 def run_karpathy_gpt2():
@@ -125,15 +127,22 @@ def run_hf_gpt2():
 
 def run_gpt2():
 
+    models = {
+    'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
+    'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
+    'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
+    }
+
     max_length = 50
     num_return_sequences = 5
     temperature = 0.7
     top_k = 50
-    prompt = "The capital of India is"
+    prompt = "One inch is equal to"
     
     key = jax.random.PRNGKey(0)    
     rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
-    m, _ = GPT2.from_pretrained(rngs)
+    #m, _ = GPT2.from_pretrained(rngs)
+    m = GPT2(GPTConfig(), rngs)
     m.eval()
     enc = tiktoken.get_encoding('gpt2')
     tokens = enc.encode(prompt)
@@ -141,6 +150,7 @@ def run_gpt2():
     tokens = jnp.expand_dims(tokens, axis=0)
     x = jnp.tile(tokens, (num_return_sequences, 1)) 
 
+    # Generate sample text
     while x.shape[1] < max_length: 
         logits = m(x) 
         logits = logits[:, -1, :] / temperature # (B, vocab_size)
@@ -153,13 +163,31 @@ def run_gpt2():
         decoded = enc.decode(tokens)
         print(">", decoded)
 
+    # Load the dataset
+    text = dl.load_text("datasets/panchatantra-ryder.txt")
+    print(text)
+    text = text[:1000]
+    tokens = enc.encode(text)
+    print(len(tokens))
+    B, T = 4, 32
+    buf = jnp.array(tokens[:B*T + 1])
+    print(buf.shape)
+    x = buf[:-1].reshape(B, T)
+    y = buf[1:].reshape(B, T)
+
+    # Train the model
+    m.train()
+    optimizer = nnx.Optimizer(m, optax.adam(1e-3))
+    loss = train_step(m, optimizer, x, y)
+    print(f"Loss: {loss:0.4f}")
+
 
 
 def run_charformer():
 
     text = dl.load_text("datasets/panchatantra-ryder.txt")
-    encode, decode, vocab_size = dl.get_encoder_decoder(text)
-    data = dl.encode_text(text, encode)
+    dataloader = dl.CharLoader(text)
+    data = dataloader.encode_text(text)
 
     n = int(0.9*len(data))
     train_data = data[:n]
@@ -171,22 +199,22 @@ def run_charformer():
     features = 32
     num_heads = 4
     num_blocks = 3
-    m = Charformer(vocab_size, features, num_heads, num_blocks, BLOCK_SIZE, rngs)
+    m = Charformer(dataloader.vocab_size, features, num_heads, num_blocks, BLOCK_SIZE, rngs)
 
     # Generate sample text
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
-    out = decode(out)
+    out = dataloader.decode(out)
     print(out)
 
     # Train the model
     batch_size = 32
     optimizer = nnx.Optimizer(m, optax.adam(1e-3))
 
-    valid_xb, valid_yb = dl.get_batch(key, val_data, len(val_data), BLOCK_SIZE)
+    valid_xb, valid_yb = dataloader.get_batch(key, val_data, len(val_data), BLOCK_SIZE)
 
-    for steps in range(5000):
+    for steps in range(80):
         key = jax.random.split(key)[0]
-        xb, yb = dl.get_batch(key, train_data, batch_size, BLOCK_SIZE)
+        xb, yb = dataloader.get_batch(key, train_data, batch_size, BLOCK_SIZE)
         train_loss = train_step(m, optimizer, xb, yb)
         valid_loss = train_step(m, optimizer, valid_xb, valid_yb)
         if steps % 20 == 0:
@@ -194,8 +222,8 @@ def run_charformer():
 
     # Generate sample text 
     out = m.generate(key, jnp.zeros((1, 1), dtype=jnp.int32), BLOCK_SIZE, max_new_tokens=100)[0].tolist()
-    out = decode(out)
+    out = dataloader.decode(out)
     print(out)
 
 if __name__ == "__main__":
-    run_gpt2()
+    run_charformer()
