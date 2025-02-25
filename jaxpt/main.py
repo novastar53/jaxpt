@@ -128,7 +128,8 @@ def run_gpt2():
     rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
     #m, _ = GPT2.from_pretrained(rngs)
     m = GPT2(GPTConfig(), rngs)
-    generate_completion(m, "Once upon a time,")
+
+    generate_completion(m, "BOOK I")
 
     # Load the dataset
     enc = tiktoken.get_encoding('gpt2')
@@ -138,7 +139,8 @@ def run_gpt2():
 
     # Train the model
     n_epochs = 1
-    B, T = 4, 32
+    B, T = 16, 32
+    print(f"Number of iterations per epoch: {len(data) // B // T}")
 
     m.train()
     optimizer = nnx.Optimizer(m, optax.adamw(3e-4))
@@ -151,8 +153,8 @@ def run_gpt2():
             y_batch = jnp.array(buffer[1:]).reshape((B, T))
             loss = train_step(m, optimizer, x_batch, y_batch)
             print(f"Iter: {i}, Loss: {loss:0.4f}")
-
-    generate_completion(m, "Once upon a time,")
+    
+    generate_completion(m, "BOOK I")
 
 def run_charformer():
 

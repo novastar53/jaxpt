@@ -27,8 +27,15 @@ class CausalSelfAttention(nnx.Module):
 
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.c_attn = nnx.Linear(config.n_embed, 3 * config.n_embed, rngs=rngs)
-        self.c_proj = nnx.Linear(config.n_embed, config.n_embed, rngs=rngs)
+        self.c_attn = nnx.Linear(config.n_embed, 3 * config.n_embed, 
+                                 kernel_init=nnx.initializers.normal(stddev=0.02),
+                                 bias_init=nnx.initializers.zeros,
+                                 rngs=rngs)
+        self.c_proj = nnx.Linear(config.n_embed, config.n_embed,
+                                 kernel_init=nnx.initializers.normal(stddev=0.02*(2*config.n_layer)**-0.5),
+                                 bias_init=nnx.initializers.zeros,
+                                 rngs=rngs)
+
         self.n_head = config.n_head
         self.n_embed = config.n_embed
         self.mask = nnx.Variable(jnp.tril(jnp.ones((config.block_size, config.block_size)) \
@@ -41,16 +48,16 @@ class CausalSelfAttention(nnx.Module):
         qkv = self.c_attn(x) # B, T, 3 * C
         q, k, v = jnp.split(qkv, 3, axis=-1) # 3 * (B, T, C)
 
-        k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
-        k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
-
         q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
         q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+
+        k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
+        k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head)) # B, T, n_head, C // n_head
         v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
-        att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1]) 
+        att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1])  # B, n_head, T, T
         att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
         att = jax.nn.softmax(att, axis=-1)
         att = self.attn_dropout(att)
@@ -65,8 +72,14 @@ class CausalSelfAttention(nnx.Module):
 class MLP(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.c_fc = nnx.Linear(config.n_embed, 4 * config.n_embed, rngs=rngs)
-        self.c_proj = nnx.Linear(4 * config.n_embed, config.n_embed, rngs=rngs)
+        self.c_fc = nnx.Linear(config.n_embed, 4 * config.n_embed,
+                                 kernel_init=nnx.initializers.normal(stddev=0.02),
+                                 bias_init=nnx.initializers.zeros,
+                                 rngs=rngs)
+        self.c_proj = nnx.Linear(4 * config.n_embed, config.n_embed,
+                                 kernel_init=nnx.initializers.normal(stddev=0.02),
+                                 bias_init=nnx.initializers.zeros,
+                                 rngs=rngs)
         self.dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
 
     def __call__(self, x):
@@ -102,8 +115,10 @@ class Transformer(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
-        self.wte = nnx.Embed(config.vocab_size, config.n_embed, rngs=rngs)
-        self.wpe = nnx.Embed(config.block_size, config.n_embed, rngs=rngs)
+        self.wte = nnx.Embed(config.vocab_size, config.n_embed, 
+                             embedding_init=nnx.initializers.normal(stddev=0.02), rngs=rngs)
+        self.wpe = nnx.Embed(config.block_size, config.n_embed,
+                             embedding_init=nnx.initializers.normal(stddev=0.02), rngs=rngs)
         self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)  
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(config.n_embed, rngs=rngs)
