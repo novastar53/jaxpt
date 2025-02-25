@@ -145,7 +145,7 @@ def run_gpt2():
     m.train()
     optimizer = nnx.Optimizer(m, optax.adamw(3e-4))
 
-    for e in range(1):
+    for e in range(n_epochs):
         for i in range(len(data) // (B*T)):
             buffer = data[i*B*T:(i+1)*B*T+1]
             assert(len(buffer) == B*T+1)
