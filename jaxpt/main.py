@@ -115,47 +115,6 @@ def run_hf_gpt2():
     print(generated_text)
 
 
-def run_gpt2():
-
-    models = {
-    'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
-    'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
-    'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
-    }
-
-    
-    key = jax.random.PRNGKey(0)    
-    rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
-    #m, _ = GPT2.from_pretrained(rngs)
-    m = GPT2(GPTConfig(), rngs)
-
-    generate_completion(m, "BOOK I")
-
-    # Load the dataset
-    enc = tiktoken.get_encoding('gpt2')
-    text = dl.load_text("datasets/panchatantra-ryder.txt")
-    data = enc.encode(text)
-    print(len(data))
-
-    # Train the model
-    n_epochs = 1
-    B, T = 16, 32
-    print(f"Number of iterations per epoch: {len(data) // B // T}")
-
-    m.train()
-    optimizer = nnx.Optimizer(m, optax.adamw(3e-4))
-
-    for e in range(n_epochs):
-        for i in range(len(data) // (B*T)):
-            buffer = data[i*B*T:(i+1)*B*T+1]
-            assert(len(buffer) == B*T+1)
-            x_batch = jnp.array(buffer[:-1]).reshape((B, T))
-            y_batch = jnp.array(buffer[1:]).reshape((B, T))
-            loss = train_step(m, optimizer, x_batch, y_batch)
-            print(f"Iter: {i}, Loss: {loss:0.4f}")
-    
-    generate_completion(m, "BOOK I")
-
 def run_charformer():
 
     text = dl.load_text("datasets/panchatantra-ryder.txt")
@@ -199,4 +158,4 @@ def run_charformer():
     print(out)
 
 if __name__ == "__main__":
-    run_gpt2()
+    run_hf_gpt2()

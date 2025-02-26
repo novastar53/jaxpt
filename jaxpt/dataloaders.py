@@ -11,7 +11,9 @@ def load_text(path):
         text = f.read()
     return text
 
+
 class GPTLoader:
+
     def __init__(self, text: str):
         self.text = text
         self.chars = sorted(list(set(text)))
