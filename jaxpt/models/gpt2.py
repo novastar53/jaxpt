@@ -13,6 +13,7 @@ from utils import count_params, update_param, get_param, list_params
 
 @dataclass
 class GPTConfig:
+    dtype: jnp.dtype = jnp.bfloat16
     block_size: int = 1024 # sequence length
     vocab_size: int = 50257 # tiktoken bpe encoded text
     n_layer: int = 12 # number of attention blocks 
@@ -30,15 +31,17 @@ class CausalSelfAttention(nnx.Module):
         self.c_attn = nnx.Linear(config.n_embed, 3 * config.n_embed, 
                                  kernel_init=nnx.initializers.normal(stddev=0.02),
                                  bias_init=nnx.initializers.zeros,
+                                 dtype=config.dtype,
                                  rngs=rngs)
         self.c_proj = nnx.Linear(config.n_embed, config.n_embed,
                                  kernel_init=nnx.initializers.normal(stddev=0.02*(2*config.n_layer)**-0.5),
                                  bias_init=nnx.initializers.zeros,
+                                 dtype=config.dtype,
                                  rngs=rngs)
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        self.mask = nnx.Variable(jnp.tril(jnp.ones((config.block_size, config.block_size)) \
+        self.mask = nnx.Variable(jnp.tril(jnp.ones((config.block_size, config.block_size), dtype=config.dtype) \
                         .reshape((1, 1, config.block_size, config.block_size)))) 
         self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
@@ -75,10 +78,12 @@ class MLP(nnx.Module):
         self.c_fc = nnx.Linear(config.n_embed, 4 * config.n_embed,
                                  kernel_init=nnx.initializers.normal(stddev=0.02),
                                  bias_init=nnx.initializers.zeros,
+                                 dtype=config.dtype,
                                  rngs=rngs)
         self.c_proj = nnx.Linear(4 * config.n_embed, config.n_embed,
                                  kernel_init=nnx.initializers.normal(stddev=0.02),
                                  bias_init=nnx.initializers.zeros,
+                                 dtype=config.dtype,
                                  rngs=rngs)
         self.dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
 
@@ -93,9 +98,9 @@ class MLP(nnx.Module):
 class Block(nnx.Module):
 
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.ln_1 = nnx.LayerNorm(config.n_embed, rngs=rngs)
+        self.ln_1 = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
         self.attn = CausalSelfAttention(config, rngs=rngs)
-        self.ln_2 = nnx.LayerNorm(config.n_embed, rngs=rngs)
+        self.ln_2 = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
         self.mlp = MLP(config, rngs=rngs)
     
     def __call__(self, x):
@@ -116,12 +121,16 @@ class Transformer(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(config.vocab_size, config.n_embed, 
-                             embedding_init=nnx.initializers.normal(stddev=0.02), rngs=rngs)
+                             embedding_init=nnx.initializers.normal(stddev=0.02),
+                             dtype=config.dtype,
+                             rngs=rngs)
         self.wpe = nnx.Embed(config.block_size, config.n_embed,
-                             embedding_init=nnx.initializers.normal(stddev=0.02), rngs=rngs)
+                             embedding_init=nnx.initializers.normal(stddev=0.02),
+                             dtype=config.dtype,
+                             rngs=rngs)
         self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)  
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
-        self.ln_f = nnx.LayerNorm(config.n_embed, rngs=rngs)
+        self.ln_f = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
 
     
     def __call__(self, idx):
@@ -141,8 +150,10 @@ class GPT2(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.transformer = Transformer(config, rngs=rngs)
-        self.lm_head = nnx.Linear(config.n_embed, config.vocab_size, rngs=rngs, 
-                                  use_bias=False)
+        self.lm_head = nnx.Linear(config.n_embed, config.vocab_size,
+                                  dtype=config.dtype,
+                                  use_bias=False,
+                                  rngs=rngs)
         
         # weight sharing scheme
         self.transformer.wte.kernel = self.lm_head.kernel
