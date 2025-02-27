@@ -129,7 +129,7 @@ class Transformer(nnx.Module):
     
     def __call__(self, idx):
         B, T = idx.shape
-        pos = jnp.arange(0, T, dtype=self.config.dtype)
+        pos = jnp.arange(0, T, dtype=jnp.int16)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
         x = self.dropout(tok_emb + pos_emb)
