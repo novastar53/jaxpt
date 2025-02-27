@@ -15,7 +15,7 @@ from utils import count_params, update_param, get_param, list_params
 class GPTConfig:
     dtype: jnp.dtype = jnp.bfloat16
     block_size: int = 1024 # sequence length
-    vocab_size: int = 50257 # tiktoken bpe encoded text
+    vocab_size: int = 50304 # tiktoken bpe encoded text
     n_layer: int = 12 # number of attention blocks 
     n_head: int = 12 # number of attention heads
     n_embed: int = 768 # number token embedding dimensionsa
@@ -105,15 +105,8 @@ class Block(nnx.Module):
         self.mlp = MLP(config, rngs=rngs)
     
     def __call__(self, x):
-        res = x
-        x = self.ln_1(x)    
-        x = self.attn(x)
-        x = x + res
-
-        res = x
-        x = self.ln_2(x)
-        x = self.mlp(x)
-        x = x + res
+        x = self.attn(self.ln_1(x)) + x
+        x = self.mlp(self.ln_2(x)) + x
         return x
 
 
@@ -136,7 +129,7 @@ class Transformer(nnx.Module):
     
     def __call__(self, idx):
         B, T = idx.shape
-        pos = jnp.arange(0, T, dtype=jnp.int32)
+        pos = jnp.arange(0, T, dtype=self.config.dtype)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
         x = self.dropout(tok_emb + pos_emb)
