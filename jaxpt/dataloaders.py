@@ -31,6 +31,8 @@ class DataLoader:
 
     def __call__(self):
         buf = self.tokens[self.pos:self.pos+self.B*self.T+1]
+        if len(buf) < self.B*self.T+1:
+            buf = jnp.pad(buf, (0, self.B*self.T+1 - len(buf)), mode='constant', constant_values=0)
         X = buf[:-1].reshape((self.B, self.T))
         Y = buf[1:].reshape((self.B, self.T))
         self.pos += self.B*self.T

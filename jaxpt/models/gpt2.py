@@ -144,20 +144,22 @@ class GPT2(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.transformer = Transformer(config, rngs=rngs)
-        self.lm_head = nnx.Linear(config.n_embed, config.vocab_size,
-                                  dtype=config.dtype,
-                                  use_bias=False,
-                                  rngs=rngs)
-        
         # weight sharing scheme
-        self.transformer.wte.kernel = self.lm_head.kernel
+        #self.lm_head = nnx.Linear(config.n_embed, config.vocab_size,
+        #                          dtype=config.dtype,
+        #                          use_bias=False,
+        #                          rngs=rngs)
+       # 
+        self.lm_head = self.transformer.wte.embedding
+
+        #assert(id(self.lm_head.kernel.value) == id(self.transformer.wte.embedding.value))
 
     
     def __call__(self, idx):
         B, T = idx.shape
         assert T <= self.config.block_size
         x = self.transformer(idx)
-        logits = self.lm_head(x)
+        logits = x @ jnp.transpose(self.lm_head.value, (1, 0))
         return logits
 
 
