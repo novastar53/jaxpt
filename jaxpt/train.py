@@ -25,7 +25,7 @@ def accum_step(model, batch, targets, accum_grad, accum_loss):
     accum_loss = accum_loss + loss
     return accum_grad, accum_loss 
 
-
+  
 @nnx.jit(static_argnames=("B", "T"))
 def train_step(model, optimizer, data, B, T, rng):
     k = jax.random.randint(rng, (1,), 0, len(data) - B*T - 1)[0]
