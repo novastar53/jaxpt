@@ -16,18 +16,16 @@ def loss_fn(model, batch, targets):
     return loss
 
 
-
-@nnx.jit(static_argnames=("B", "T"))
-def accum_step(model, data, B, T, accum_grad, accum_loss, rng):
-    k = jax.random.randint(rng, (1,), 0, len(data) - B*T - 1)[0]
-    batch = jax.lax.dynamic_slice(data, (k,), (B*T,)).reshape((B, T))
-    targets = jax.lax.dynamic_slice(data, (k+1,), (B*T,)).reshape((B, T))
+@nnx.jit(donate_argnames=("accum_grad",))
+def accum_step(model, batch, targets, accum_grad, accum_loss):
     loss, grads =  nnx.value_and_grad(loss_fn)(model, batch, targets)
+    if accum_grad is None:
+        accum_grad = jax.tree_util.tree_map(jnp.zeros_like, grads)
     accum_grad = jax.tree_util.tree_map(lambda x, y: x + y, accum_grad, grads)
     accum_loss = accum_loss + loss
-    return accum_grad, accum_loss
+    return accum_grad, accum_loss 
 
-
+  
 @nnx.jit(static_argnames=("B", "T"))
 def train_step(model, optimizer, data, B, T, rng):
     k = jax.random.randint(rng, (1,), 0, len(data) - B*T - 1)[0]
