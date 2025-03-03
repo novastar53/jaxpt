@@ -6,7 +6,7 @@ import flax.nnx as nnx
 
 from transformers import GPT2LMHeadModel
 
-from utils import count_params, update_param, get_param
+from jaxpt.utils import count_params, update_param, get_param
 
 
 @dataclass

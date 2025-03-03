@@ -3,19 +3,37 @@
 # Default Python version
 PYTHON_VERSION ?= 3.13
 
-# Install dependencies from lockfile
+# Detect platform
+UNAME_M := $(shell uname -m)
+UNAME_S := $(shell uname -s)
+
+# Set JAX extras based on platform
+ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        JAX_PLATFORM = metal
+    else
+        JAX_PLATFORM = cuda
+    endif
+else
+    JAX_PLATFORM = cuda
+endif
+
+# Install dependencies from lockfile with platform-specific JAX
 install:
 	uv sync
+	uv add ".[$(JAX_PLATFORM)]" --dev
 	uv run python -m ipykernel install --user --name=jaxpt --display-name "Python $(PYTHON_VERSION) (jaxpt)"
 
 # Install development dependencies
 dev:
 	uv sync --all-groups
+	uv add ".[$(JAX_PLATFORM)]" --dev
 
 # Regenerate lockfile from scratch
 regen-lock:
 	rm -f uv.lock
 	uv sync
+	uv add ".[$(JAX_PLATFORM)]" --dev
 
 # Add a production dependency (usage: make add pkg=package_name)
 add:
