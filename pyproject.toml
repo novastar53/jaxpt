@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "jaxpt"
 version = "0.1.0"
@@ -20,6 +24,9 @@ dependencies = [
 dev = [
     "ipykernel>=6.29.5",
 ]
+
+[tool.hatch.build]
+packages = ["src/jaxpt"]
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -47,7 +54,7 @@ select = ["E", "F", "B"]
 # Ignore specific rules
 ignore = [
     "E501",  # Line too long
-    "E741",  # Ambiguous variable name
+    "E741",   # Ambiguous variable name
     "F403",  # 'from module import *' used
     "F405",  # Name may be undefined, or defined from star imports
 ]
@@ -56,7 +63,7 @@ ignore = [
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.format]
-# Use single quotes for strings.
+# Use double quotes for strings.
 quote-style = "double"
 
 # Indent with spaces, rather than tabs.
