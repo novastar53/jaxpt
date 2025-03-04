@@ -5,6 +5,12 @@ GPT models built with JAX
 
 This project implements the GPT series of models using Jax and Flax's NNX library.
 
+### Requirements
+
+Install the UV python package managment library
+
+`curl -LsSf https://astral.sh/uv/install.sh | sh`
+
 ### Available Commands
 
 The main commands available in the Makefile are:
