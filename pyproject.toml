@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jaxpt"
+version = "0.1.0"
+description = "GPT models built with Jax"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=3.3.2",
+    "flax>=0.10.2",
+    "huggingface>=0.0.1",
+    "ipykernel>=6.29.5",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.0",
+    "requests>=2.32.3",
+    "tiktoken>=0.9.0",
+    "torch>=2.6.0",
+    "transformers>=4.49.0",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "jax[cuda12_pip]>=0.5.0",
+]
+metal = [
+    "jax>=0.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "jaxpt[metal]",
+]
+
+[tool.hatch.build]
+packages = ["src/jaxpt"]
+
+[tool.hatch.envs.default]
+dependencies = [
+    "jax>=0.5.0; platform_machine == 'arm64' and platform_system == 'Darwin'",
+    "jax[cuda12_pip]>=0.5.0; platform_machine == 'x86_64'",
+]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pypackages__",
+    "build",
+    "dist",
+]
+
+# Same as Black.
+line-length = 88
+indent-width = 4
+
+# Assume Python 3.13
+target-version = "py313"
+
+[tool.ruff.lint]
+# Enable flake8-bugbear (`B`) rules.
+select = ["E", "F", "B"]
+
+# Ignore specific rules
+ignore = [
+    "E501",  # Line too long
+    "E741",   # Ambiguous variable name
+    "F403",  # 'from module import *' used
+    "F405",  # Name may be undefined, or defined from star imports
+]
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Use double quotes for strings.
+quote-style = "double"
+
+# Indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+[tool.uv.sources]
+jaxpt = { workspace = true }
