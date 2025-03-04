@@ -5,7 +5,7 @@ from datasets import load_dataset
 
 
 local_dir =  "data" 
-
+https://www.youtube.com/watch?v=l8pRSuU81PU
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 
