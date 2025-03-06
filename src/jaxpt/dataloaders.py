@@ -14,7 +14,6 @@ def load_text(path):
         text = f.read()
     return text
 
-
 class DataLoader:
     def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int):
         self.dirpath = dirpath
@@ -77,6 +76,7 @@ class DataLoader:
         Y = buf[1:].reshape((self.D, self.B, self.T))
         
         return jnp.array(X), jnp.array(Y)
+
 
 
 class CharLoader:
