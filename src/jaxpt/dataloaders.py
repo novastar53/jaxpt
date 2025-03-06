@@ -42,7 +42,7 @@ class DataLoader:
     def __load_shard(self):
         shard = self.shards[self.cur_shard]
         tokens = np.load(os.path.join(self.dirpath, shard))
-        if type(tokens) is not np.array:
+        if type(tokens) is not np.ndarray:
             tokens = tokens["arr_0"]
         return tokens
         
