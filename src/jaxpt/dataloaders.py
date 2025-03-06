@@ -15,7 +15,7 @@ def load_text(path):
     return text
 
 class DataLoader:
-    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int):
+    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int, label: str | None=None):
         self.dirpath = dirpath
         self.enc = tiktoken.get_encoding("gpt2")
         self.eot = self.enc._special_tokens['<|endoftext|>']
@@ -25,6 +25,9 @@ class DataLoader:
         self.D = device_rank
 
         self.shards = os.listdir(dirpath)
+        if label is not None:
+            self.shards = [shard for shard in self.shards if label in shard]
+
         self.cur_shard = 0
         self.pos = 0
         self.shard = self.__load_shard()
@@ -38,6 +41,9 @@ class DataLoader:
         print(f"block size:     {self.T}")
         print(f"device rank:    {self.D}")
         print("------------------------")
+
+    def __len__(self):
+        return len(self.shards)
 
     def __load_shard(self):
         shard = self.shards[self.cur_shard]
