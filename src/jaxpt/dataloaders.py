@@ -35,6 +35,7 @@ class DataLoader:
         
         print("dataloader initialized:")
         print("------------------------")
+        print(f"label:          {label}")
         print(f"shards:         {len(self.shards):,}")
         print(f"shard size:     {self.shard_size:,}")
         print(f"batch size:     {self.B}")
@@ -43,7 +44,7 @@ class DataLoader:
         print("------------------------")
 
     def __len__(self):
-        return len(self.shards)
+        return len(self.shards) * self.shard_size
 
     def __load_shard(self):
         shard = self.shards[self.cur_shard]
