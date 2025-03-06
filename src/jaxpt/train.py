@@ -13,16 +13,14 @@ def loss_fn(model, batch, targets):
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
     return loss
 
-
-@nnx.jit(donate_argnames=("accum_grad",))
+@nnx.pmap(in_axes=(None, 0, 0, None, None))
 def accum_step(model, batch, targets, accum_grad, accum_loss):
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
     if accum_grad is None:
-        accum_grad = jax.tree_util.tree_map(jnp.zeros_like, grads)
+      accum_grad = jax.tree_util.tree_map(jnp.zeros_like, grads)
     accum_grad = jax.tree_util.tree_map(lambda x, y: x + y, accum_grad, grads)
     accum_loss = accum_loss + loss
     return accum_grad, accum_loss
-
 
 @nnx.jit(static_argnames=("B", "T"))
 def train_step(model, optimizer, data, B, T, rng):
