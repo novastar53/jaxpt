@@ -1,6 +1,9 @@
 from typing import Callable
+import os
+from pathlib import Path
 
 import jax
+import numpy as np
 import jax.numpy as jnp
 
 import tiktoken
@@ -13,36 +16,67 @@ def load_text(path):
 
 
 class DataLoader:
-    def __init__(self, fpath: str, batch_size: int, block_size: int):
-        text = load_text(fpath)
-        self.tokens = jnp.array(tiktoken.get_encoding("gpt2").encode(text))
+    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int):
+        self.dirpath = dirpath
+        self.enc = tiktoken.get_encoding("gpt2")
+        self.eot = self.enc._special_tokens['<|endoftext|>']
+       
         self.B = batch_size
         self.T = block_size
-        self.n = len(self.tokens)
-        self.pos = 0
+        self.D = device_rank
 
-        print("dataLoader initialized:")
+        self.shards = os.listdir(dirpath)
+        self.cur_shard = 0
+        self.pos = 0
+        self.shard = self.__load_shard()
+        self.shard_size = len(self.shard)
+        
+        print("dataloader initialized:")
         print("------------------------")
-        print(f"tokens:         {self.n}")
+        print(f"shards:         {len(self.shards):,}")
+        print(f"shard size:     {self.shard_size:,}")
         print(f"batch size:     {self.B}")
         print(f"block size:     {self.T}")
+        print(f"device rank:    {self.D}")
         print("------------------------")
 
-    def __call__(self):
-        buf = self.tokens[self.pos : self.pos + self.B * self.T + 1]
-        if len(buf) < self.B * self.T + 1:
-            buf = jnp.pad(
-                buf,
-                (0, self.B * self.T + 1 - len(buf)),
-                mode="constant",
-                constant_values=0,
-            )
-        X = buf[:-1].reshape((self.B, self.T))
-        Y = buf[1:].reshape((self.B, self.T))
-        self.pos += self.B * self.T
-        if self.pos >= self.n:
+    def __load_shard(self):
+        shard = self.shards[self.cur_shard]
+        tokens = np.load(os.path.join(self.dirpath, shard))
+        if type(tokens) is not np.array:
+            tokens = tokens["arr_0"]
+        return tokens
+        
+    def __call__(self):     
+        # preallocate the  buffer
+        buf_size = self.B * self.T * self.D + 1
+        buf = np.zeros((buf_size,), dtype=np.uint16)
+
+        # if the shard has enough tokens remaining
+        if self.pos + buf_size < self.shard_size:
+            buf[:] = self.shard[self.pos:self.pos + buf_size]
+            self.pos += buf_size
+        else: 
+            # load the buffer in part
+            buf_prefix_size = buf_size - (self.shard_size - self.pos) 
+            buf[:buf_prefix_size] = self.shard[self.pos:self.pos + buf_prefix_size]
+
+             # load the next shard
+            if self.cur_shard < len(self.shards) - 1:
+                self.cur_shard += 1              
+            else:
+                self.cur_shard = 0
+            self.shard = self.__load_shard()
             self.pos = 0
-        return X, Y, self.pos
+    
+            # load the remainder of the buffer
+            buf[buf_prefix_size:] = self.shard[:buf_size - buf_prefix_size]
+            self.pos = (buf_size - buf_prefix_size)
+           
+        X = buf[:-1].reshape((self.D, self.B, self.T))
+        Y = buf[1:].reshape((self.D, self.B, self.T))
+        
+        return jnp.array(X), jnp.array(Y)
 
 
 class CharLoader:
