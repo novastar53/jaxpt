@@ -15,5 +15,9 @@ if __name__ == "__main__":
         tokens = [eot]
         tokens += enc.encode_ordinary(txt)
         tokens = np.array(tokens)
-        output_path = os.path.join(Path(), "processed", "panchatantra_0.npy")
-        np.save(output_path, tokens)
+        train_tokens = tokens[:int(0.9*len(tokens))]
+        valid_tokens = tokens[int(0.9*len(tokens)):]
+        output_path = os.path.join(Path(), "processed", "panchatantra_train_0.npy")
+        np.save(output_path, train_tokens)
+        output_path = os.path.join(Path(), "processed", "panchatantra_valid_1.npy")
+        np.save(output_path, valid_tokens)
