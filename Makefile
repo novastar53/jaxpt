@@ -53,7 +53,7 @@ remove:
 
 # Clean build artifacts and cache
 clean:
-    rm -rf uv.lock
+	rm -rf uv.lock
 	rm -rf build/
 	rm -rf dist/
 	rm -rf src/jaxpt.egg-info/
