@@ -37,12 +37,12 @@ class DataLoader:
         if not quiet:
             print(f"""dataloader initialized:
 ------------------------
-f"label:          {label}
-f"shards:         {len(self.shards):,}
-f"shard size:     {self.shard_size:,}
-f"batch size:     {self.B}
-f"block size:     {self.T}
-f"device rank:    {self.D}
+label:          {label}
+shards:         {len(self.shards):,}
+shard size:     {self.shard_size:,}
+batch size:     {self.B}
+block size:     {self.T}
+device rank:    {self.D}
 ------------------------""")
 
     def __len__(self):
