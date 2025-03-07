@@ -1,4 +1,4 @@
-.PHONY: install clean build dev lint format sync
+.PHONY: install clean build dev lint format sync all add add-dev remove regen-lock list lab help
 
 # Default Python version
 PYTHON_VERSION ?= 3.13
@@ -114,3 +114,5 @@ help:
 	@echo "  make sdist     - Create source distribution"
 	@echo "  make list      - Show installed packages"
 	@echo "  make lab       - Run Jupyter lab" 
+	@echo "  make jupyter-ssh-tunnel - SSH tunnel to Jupyter lab"
+	@echo "  make help      - Show this help message"
