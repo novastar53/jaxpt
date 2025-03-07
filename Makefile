@@ -10,16 +10,16 @@ UNAME_S := $(shell uname -s)
 # Set JAX extras based on platform
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(UNAME_M),arm64)
-        JAX_EXTRAS = metal
+        JAX_PLATFORM = metal
     else
         ifeq ($(UNAME_M),x86_64)
-            JAX_EXTRAS = cuda
+            JAX_PLATFORM = cuda
         else
             $(error Unsupported architecture: $(UNAME_M))
         endif
     endif
 else
-    JAX_EXTRAS = cuda
+    JAX_PLATFORM = cuda
 endif
 
 print-platform:
