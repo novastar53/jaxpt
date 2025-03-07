@@ -14,10 +14,10 @@ def loss_fn(model, batch, targets):
     return loss
 
 
-@nnx.pmap(axis_name='devices', in_axes=(None, 0, 0), out_axes=(0, 0))
-def train_step(model, batch, targets):
+@nnx.pmap(axis_name='devices', in_axes=(None, None, 0, 0), out_axes=(0, 0))
+def train_step(model, optimizer, batch, targets):
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
     loss = jax.lax.pmean(loss, axis_name='devices')
     grads = jax.lax.pmean(grads, axis_name='devices')
+    optimizer.update(grads)
     return loss, grads
-
