@@ -25,6 +25,7 @@ class DataLoader:
         self.D = device_rank
 
         self.shards = os.listdir(dirpath)
+        print(self.shards)
         if label is not None:
             self.shards = [shard for shard in self.shards if label in shard]
 
