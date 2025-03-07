@@ -13,21 +13,11 @@ def loss_fn(model, batch, targets):
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
     return loss
 
-@nnx.pmap(in_axes=(None, 0, 0, None, None))
-def accum_step(model, batch, targets, accum_grad, accum_loss):
-    loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
-    if accum_grad is None:
-      accum_grad = jax.tree_util.tree_map(jnp.zeros_like, grads)
-    accum_grad = jax.tree_util.tree_map(lambda x, y: x + y, accum_grad, grads)
-    accum_loss = accum_loss + loss
-    return accum_grad, accum_loss
 
-@nnx.jit(static_argnames=("B", "T"))
-def train_step(model, optimizer, data, B, T, rng):
-    k = jax.random.randint(rng, (1,), 0, len(data) - B * T - 1)[0]
-    batch = jax.lax.dynamic_slice(data, (k,), (B * T,)).reshape((B, T))
-    targets = jax.lax.dynamic_slice(data, (k + 1,), (B * T,)).reshape((B, T))
+@nnx.pmap(axis_name='devices', in_axes=(None, None, 0, 0), out_axes=(0, 0))
+def train_step(model, optimizer, batch, targets):
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
-    norm = compute_global_norm(grads)
+    loss = jax.lax.pmean(loss, axis_name='devices')
+    grads = jax.lax.pmean(grads, axis_name='devices')
     optimizer.update(grads)
-    return loss, norm
+    return loss, grads

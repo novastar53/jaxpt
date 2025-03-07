@@ -1,4 +1,4 @@
-.PHONY: install clean build dev lint format sync
+.PHONY: install clean build dev lint format sync all add add-dev remove regen-lock list lab help
 
 # Default Python version
 PYTHON_VERSION ?= 3.13
@@ -12,28 +12,32 @@ ifeq ($(UNAME_S),Darwin)
     ifeq ($(UNAME_M),arm64)
         JAX_PLATFORM = metal
     else
-        JAX_PLATFORM = cuda
+        ifeq ($(UNAME_M),x86_64)
+            JAX_PLATFORM = cuda
+        else
+            $(error Unsupported architecture: $(UNAME_M))
+        endif
     endif
 else
     JAX_PLATFORM = cuda
 endif
 
+print-platform:
+	@echo "JAX_PLATFORM: $(JAX_PLATFORM)"
+
 # Install dependencies from lockfile with platform-specific JAX
-install:
-	uv sync
-	uv add ".[$(JAX_PLATFORM)]" --dev
-	uv run python -m ipykernel install --user --name=jaxpt --display-name "Python $(PYTHON_VERSION) (jaxpt)"
+install:	
+	uv sync --extra $(JAX_PLATFORM)
 
 # Install development dependencies
-dev:
-	uv sync --all-groups
-	uv add ".[$(JAX_PLATFORM)]" --dev
+dev: install
+	uv sync --extra dev
+	uv run python -m ipykernel install --user --name=jaxpt --display-name "Python $(PYTHON_VERSION) (jaxpt)"
 
 # Regenerate lockfile from scratch
 regen-lock:
 	rm -f uv.lock
-	uv sync
-	uv add ".[$(JAX_PLATFORM)]" --dev
+	uv sync --extra $(JAX_PLATFORM) --extra dev
 
 # Add a production dependency (usage: make add pkg=package_name)
 add:
@@ -49,6 +53,7 @@ remove:
 
 # Clean build artifacts and cache
 clean:
+	rm -rf uv.lock
 	rm -rf build/
 	rm -rf dist/
 	rm -rf src/jaxpt.egg-info/
@@ -81,10 +86,6 @@ wheel:
 sdist:
 	uv build --sdist .
 
-# Install in development mode
-develop:
-	uv pip install -e .
-
 # Show installed packages
 list:
 	uv pip list
@@ -101,16 +102,17 @@ help:
 	@echo "Available commands:"
 	@echo "  make install   - Install dependencies from lockfile"
 	@echo "  make dev       - Install all dependencies including dev from lockfile"
+	@echo "  make regen-lock - Regenerate lockfile from scratch"
 	@echo "  make add       - Add a production dependency (make add pkg=package_name)"
 	@echo "  make add-dev   - Add a development dependency (make add-dev pkg=package_name)"
 	@echo "  make remove    - Remove a dependency (make remove pkg=package_name)"
-	@echo "  make sync      - Sync dependencies with lockfile"
 	@echo "  make clean     - Clean build artifacts and cache"
 	@echo "  make build     - Build package"
 	@echo "  make lint      - Run linting"
 	@echo "  make format    - Format code"
 	@echo "  make wheel     - Create wheel distribution"
 	@echo "  make sdist     - Create source distribution"
-	@echo "  make develop   - Install in development mode"
 	@echo "  make list      - Show installed packages"
 	@echo "  make lab       - Run Jupyter lab" 
+	@echo "  make jupyter-ssh-tunnel - SSH tunnel to Jupyter lab"
+	@echo "  make help      - Show this help message"

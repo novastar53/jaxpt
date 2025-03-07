@@ -13,7 +13,7 @@ from jaxpt.utils import count_params, update_param, get_param
 class GPTConfig:
     dtype: jnp.dtype = jnp.bfloat16
     block_size: int = 1024  # sequence length
-    vocab_size: int = 50304  # tiktoken bpe encoded text
+    vocab_size: int = 50257  # tiktoken bpe encoded text
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa

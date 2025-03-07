@@ -14,39 +14,49 @@ def load_text(path):
         text = f.read()
     return text
 
+
 class DataLoader:
-    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int):
+    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int, label: str | None=None, quiet: bool=False):
         self.dirpath = dirpath
         self.enc = tiktoken.get_encoding("gpt2")
         self.eot = self.enc._special_tokens['<|endoftext|>']
-       
+
         self.B = batch_size
         self.T = block_size
         self.D = device_rank
 
         self.shards = os.listdir(dirpath)
+        if label is not None:
+            self.shards = [shard for shard in self.shards if label in shard]
+
         self.cur_shard = 0
         self.pos = 0
         self.shard = self.__load_shard()
         self.shard_size = len(self.shard)
-        
-        print("dataloader initialized:")
-        print("------------------------")
-        print(f"shards:         {len(self.shards):,}")
-        print(f"shard size:     {self.shard_size:,}")
-        print(f"batch size:     {self.B}")
-        print(f"block size:     {self.T}")
-        print(f"device rank:    {self.D}")
-        print("------------------------")
+
+        if not quiet:
+            print(f"""dataloader initialized:
+------------------------
+f"label:          {label}
+f"shards:         {len(self.shards):,}
+f"shard size:     {self.shard_size:,}
+f"batch size:     {self.B}
+f"block size:     {self.T}
+f"device rank:    {self.D}
+------------------------""")
+
+    def __len__(self):
+        return len(self.shards) * self.shard_size
 
     def __load_shard(self):
         shard = self.shards[self.cur_shard]
         tokens = np.load(os.path.join(self.dirpath, shard))
         if type(tokens) is not np.ndarray:
             tokens = tokens["arr_0"]
+        self.shard_size = len(tokens)
         return tokens
-        
-    def __call__(self):     
+
+    def __call__(self):
         # preallocate the  buffer
         buf_size = self.B * self.T * self.D + 1
         buf = np.zeros((buf_size,), dtype=np.uint16)
@@ -55,28 +65,28 @@ class DataLoader:
         if self.pos + buf_size < self.shard_size:
             buf[:] = self.shard[self.pos:self.pos + buf_size]
             self.pos += buf_size
-        else: 
+        else:
             # load the buffer in part
-            buf_prefix_size = buf_size - (self.shard_size - self.pos) 
+            buf_prefix_size = (self.shard_size - self.pos)
+            #print(buf_size, buf_prefix_size, self.shard_size)
             buf[:buf_prefix_size] = self.shard[self.pos:self.pos + buf_prefix_size]
 
              # load the next shard
             if self.cur_shard < len(self.shards) - 1:
-                self.cur_shard += 1              
+                self.cur_shard += 1
             else:
                 self.cur_shard = 0
             self.shard = self.__load_shard()
             self.pos = 0
-    
+
             # load the remainder of the buffer
             buf[buf_prefix_size:] = self.shard[:buf_size - buf_prefix_size]
             self.pos = (buf_size - buf_prefix_size)
-           
+
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))
-        
-        return jnp.array(X), jnp.array(Y)
 
+        return jnp.array(X), jnp.array(Y)
 
 
 class CharLoader:
