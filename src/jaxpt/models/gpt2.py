@@ -8,8 +8,8 @@ import flax.nnx as nnx
 
 from jaxpt.utils import count_params, update_param, get_param
 
-#from flash_attention_jax import causal_flash_attention
-import jax.experimental.pallas.ops.gpu.attention as pallas_attn
+from flash_attention_jax import causal_flash_attention
+#import jax.experimental.pallas.ops.gpu.attention as pallas_attn
 
 from transformers import GPT2LMHeadModel
 
@@ -92,8 +92,8 @@ class CausalSelfAttention(nnx.Module):
         # y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         # y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
-        #y = causal_flash_attention(q, k, v)
-        y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
+        #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
+        y = causal_flash_attention(q, k, v)
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
