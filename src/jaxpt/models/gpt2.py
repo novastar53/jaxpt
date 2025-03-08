@@ -55,7 +55,7 @@ class CausalSelfAttention(nnx.Module):
         )
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
-        self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout)
+        self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
         self.rngs = rngs
 
     def __call__(self, x):
