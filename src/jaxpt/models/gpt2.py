@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from functools import partial
 
 import torch
+import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
@@ -22,6 +23,9 @@ class GPTConfig:
     resid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
 
+@partial(jax.jit, static_argnames=("approximate",))
+def mygelu(x, approximate=True):
+    return nnx.gelu(x, approximate=approximate)
 
 class CausalSelfAttention(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
@@ -113,7 +117,7 @@ class MLP(nnx.Module):
 
     def __call__(self, x):
         x = self.c_fc(x)
-        x = nnx.gelu(x, approximate=True)
+        x = mygelu(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
