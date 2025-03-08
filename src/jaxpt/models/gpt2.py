@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 
 import torch
 import jax.numpy as jnp
@@ -54,6 +55,7 @@ class CausalSelfAttention(nnx.Module):
         )
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
+        self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, droput_rng=rngs.dropout)
         self.rngs = rngs
 
     def __call__(self, x):
@@ -82,11 +84,8 @@ class CausalSelfAttention(nnx.Module):
         # att = self.attn_dropout(att)
         # y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         # y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
-        y = nnx.dot_product_attention(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T], 
-                                      dropout_rng=self.rngs.dropout, 
-                                      dropout_rate=self.attn_dropout.rate) 
-
-
+        y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
+        
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y
