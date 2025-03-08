@@ -59,6 +59,7 @@ class CausalSelfAttention(nnx.Module):
         #            (config.block_size, config.block_size), dtype=config.dtype
         #        ).reshape((1, 1, config.block_size, config.block_size))
         #    )
+        #)
         
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
@@ -94,6 +95,7 @@ class CausalSelfAttention(nnx.Module):
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
         y = causal_flash_attention(q, k, v)
+        #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
