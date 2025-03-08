@@ -1,12 +1,17 @@
 from dataclasses import dataclass
+from functools import partial
 
 import torch
+import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from transformers import GPT2LMHeadModel
-
 from jaxpt.utils import count_params, update_param, get_param
+
+from flash_attention_jax import causal_flash_attention
+#import jax.experimental.pallas.ops.gpu.attention as pallas_attn
+
+from transformers import GPT2LMHeadModel
 
 
 @dataclass
@@ -21,6 +26,9 @@ class GPTConfig:
     resid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
 
+@partial(jax.jit, static_argnames=("approximate",))
+def mygelu(x, approximate=True):
+    return nnx.gelu(x, approximate=approximate)
 
 class CausalSelfAttention(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
@@ -45,15 +53,18 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
-            )
-        )
-        self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
+        #self.mask = nnx.Variable(
+        #    jnp.tril(
+        #        jnp.ones(
+        #            (config.block_size, config.block_size), dtype=config.dtype
+        #        ).reshape((1, 1, config.block_size, config.block_size))
+        #    )
+        #)
+        
+        #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
+        #self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
+        self.rngs = rngs
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -79,10 +90,13 @@ class CausalSelfAttention(nnx.Module):
         # att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
         # att = jax.nn.softmax(att, axis=-1)
         # att = self.attn_dropout(att)
-        y = nnx.dot_product_attention(q, k, v, self.mask[:, :, :T, :T])
-
         # y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         # y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+        #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
+        #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
+        y = causal_flash_attention(q, k, v)
+        #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
+        
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y
@@ -110,7 +124,7 @@ class MLP(nnx.Module):
 
     def __call__(self, x):
         x = self.c_fc(x)
-        x = nnx.gelu(x, approximate=True)
+        x = mygelu(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -151,7 +165,7 @@ class Transformer(nnx.Module):
         self.ln_f = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
 
     def __call__(self, idx):
-        B, T = idx.shape
+        T = idx.shape[1]
         pos = jnp.arange(0, T, dtype=jnp.int16)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
@@ -177,7 +191,7 @@ class GPT2(nnx.Module):
         # assert(id(self.lm_head.kernel.value) == id(self.transformer.wte.embedding.value))
 
     def __call__(self, idx):
-        B, T = idx.shape
+        T = idx.shape[1]
         assert T <= self.config.block_size
         x = self.transformer(idx)
         logits = x @ jnp.transpose(self.lm_head.value, (1, 0))

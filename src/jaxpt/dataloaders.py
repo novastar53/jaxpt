@@ -30,7 +30,7 @@ class DataLoader:
             self.shards = [shard for shard in self.shards if label in shard]
 
         self.cur_shard = 0
-        self.pos = 0
+        self.shard_pos = 0
         self.shard = self.__load_shard()
         self.shard_size = len(self.shard)
 
@@ -49,6 +49,8 @@ device rank:    {self.D}
         return len(self.shards) * self.shard_size
 
     def __load_shard(self):
+        if self.cur_shard >= len(self.shards):
+            self.cur_shard = 0
         shard = self.shards[self.cur_shard]
         tokens = np.load(os.path.join(self.dirpath, shard))
         if type(tokens) is not np.ndarray:
@@ -62,26 +64,33 @@ device rank:    {self.D}
         buf = np.zeros((buf_size,), dtype=np.uint16)
 
         # if the shard has enough tokens remaining
-        if self.pos + buf_size < self.shard_size:
-            buf[:] = self.shard[self.pos:self.pos + buf_size]
-            self.pos += buf_size
+        if self.shard_pos + buf_size < self.shard_size:
+            buf[:] = self.shard[self.shard_pos:self.shard_pos + buf_size]
+            self.shard_pos += buf_size
         else:
-            # load the buffer in part
-            buf_prefix_size = (self.shard_size - self.pos)
-            #print(buf_size, buf_prefix_size, self.shard_size)
-            buf[:buf_prefix_size] = self.shard[self.pos:self.pos + buf_prefix_size]
+            
+            # load the remaining shard into the buffer
+            buf_prefix_size = (self.shard_size - self.shard_pos)
+            buf[:buf_prefix_size] = self.shard[self.shard_pos:self.shard_pos + buf_prefix_size]
+            buf_pos = buf_prefix_size
 
-             # load the next shard
-            if self.cur_shard < len(self.shards) - 1:
-                self.cur_shard += 1
-            else:
-                self.cur_shard = 0
+            # if the remainder of the buffer is larger than the shard, load as many shards as needed
+            if buf_size - buf_prefix_size > self.shard_size:
+                n_shards = (buf_size - buf_prefix_size) // self.shard_size
+                for _ in range(n_shards):
+                    self.cur_shard += 1
+                    self.shard = self.__load_shard()
+                    buf[buf_pos :  buf_pos + self.shard_size] = self.shard
+                    buf_pos += self.shard_size
+
+            # Load the next shard
+            self.cur_shard += 1
             self.shard = self.__load_shard()
-            self.pos = 0
+            self.shard_pos = 0
 
             # load the remainder of the buffer
-            buf[buf_prefix_size:] = self.shard[:buf_size - buf_prefix_size]
-            self.pos = (buf_size - buf_prefix_size)
+            buf[buf_pos:] = self.shard[:buf_size - buf_pos]
+            self.shard_pos = buf_size - buf_pos
 
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))

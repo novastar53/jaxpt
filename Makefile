@@ -31,7 +31,7 @@ install:
 
 # Install development dependencies
 dev: install
-	uv sync --extra dev
+	uv sync --extra dev --extra $(JAX_PLATFORM)
 	uv run python -m ipykernel install --user --name=jaxpt --display-name "Python $(PYTHON_VERSION) (jaxpt)"
 
 # Regenerate lockfile from scratch

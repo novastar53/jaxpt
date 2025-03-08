@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "datasets>=3.3.2",
+    "flash-attention-jax>=0.3.1",
     "flax>=0.10.2",
     "huggingface>=0.0.1",
     "ipykernel>=6.29.5",
