@@ -52,8 +52,9 @@ class CausalSelfAttention(nnx.Module):
                 ).reshape((1, 1, config.block_size, config.block_size))
             )
         )
-        self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
+        #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
+        self.rngs = rngs
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -79,10 +80,13 @@ class CausalSelfAttention(nnx.Module):
         # att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
         # att = jax.nn.softmax(att, axis=-1)
         # att = self.attn_dropout(att)
-        y = nnx.dot_product_attention(q, k, v, self.mask[:, :, :T, :T])
-
         # y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         # y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+        y = nnx.dot_product_attention(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T], 
+                                      dropout_rng=self.rngs.dropout, 
+                                      dropout_rate=self.attn_dropout.rate) 
+
+
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y
