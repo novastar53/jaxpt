@@ -18,7 +18,7 @@ import orbax.checkpoint as ocp
 
 @dataclass
 class GPTConfig:
-    dtype: jnp.dtype = jnp.bfloat16
+    dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50257  # tiktoken bpe encoded text
     n_layer: int = 12  # number of attention blocks
@@ -201,16 +201,17 @@ class GPT2(nnx.Module):
 
     def save_checkpoint(self, fpath: str):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)
-        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-        ckptr.save(fpath, args=ocp.args.StandardSave(other_state))
+        #ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        ckptr = ocp.StandardCheckpointer()
+        ckptr.save(fpath, other_state)
 
     @classmethod
     def from_checkpoint(cls, fpath: str, rngs: nnx.Rngs):
         checkpointer = ocp.StandardCheckpointer()
-        abstract_model = nnx.eval_shape(lambda: GPT2(GPTConfig(), rngs=rngs))
-        graphdef, _, abstract_state = nnx.split(abstract_model, nnx.RngState, ...)
-        state_restored = checkpointer.restore(fpath, target=abstract_state) 
-        model = nnx.merge(graphdef, state_restored)
+        model = GPT2(GPTConfig(), rngs=rngs)
+        _, _, other_state = nnx.split(model, nnx.RngState, ...)
+        other_state = checkpointer.restore(fpath, target=other_state) 
+        nnx.update(model, other_state)
         return model
 
     @classmethod
