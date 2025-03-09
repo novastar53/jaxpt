@@ -5,13 +5,15 @@ import torch
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
+from jax.experimental import mesh_utils
 
 from jaxpt.utils import count_params, update_param, get_param
 
+from transformers import GPT2LMHeadModel
 from flash_attention_jax import causal_flash_attention
 #import jax.experimental.pallas.ops.gpu.attention as pallas_attn
+import orbax.checkpoint as ocp
 
-from transformers import GPT2LMHeadModel
 
 
 @dataclass
@@ -196,6 +198,20 @@ class GPT2(nnx.Module):
         x = self.transformer(idx)
         logits = x @ jnp.transpose(self.lm_head.value, (1, 0))
         return logits
+
+    def save_checkpoint(self, fpath: str):
+        _, _, other_state = nnx.split(self, nnx.RngState, ...)
+        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        ckptr.save(fpath, args=ocp.args.StandardSave(other_state))
+
+    @classmethod
+    def from_checkpoint(cls, fpath: str, rngs: nnx.Rngs):
+        checkpointer = ocp.StandardCheckpointer()
+        abstract_model = nnx.eval_shape(lambda: GPT2(GPTConfig(), rngs=rngs))
+        graphdef, _, abstract_state = nnx.split(abstract_model, nnx.RngState, ...)
+        state_restored = checkpointer.restore(fpath, target=abstract_state) 
+        model = nnx.merge(graphdef, state_restored)
+        return model
 
     @classmethod
     def from_pretrained(cls, rngs: nnx.Rngs):
