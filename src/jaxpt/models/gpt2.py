@@ -5,18 +5,20 @@ import torch
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
+from jax.experimental import mesh_utils
 
 from jaxpt.utils import count_params, update_param, get_param
 
+from transformers import GPT2LMHeadModel
 from flash_attention_jax import causal_flash_attention
 #import jax.experimental.pallas.ops.gpu.attention as pallas_attn
+import orbax.checkpoint as ocp
 
-from transformers import GPT2LMHeadModel
 
 
 @dataclass
 class GPTConfig:
-    dtype: jnp.dtype = jnp.bfloat16
+    dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50257  # tiktoken bpe encoded text
     n_layer: int = 12  # number of attention blocks
@@ -196,6 +198,21 @@ class GPT2(nnx.Module):
         x = self.transformer(idx)
         logits = x @ jnp.transpose(self.lm_head.value, (1, 0))
         return logits
+
+    def save_checkpoint(self, fpath: str):
+        _, _, other_state = nnx.split(self, nnx.RngState, ...)
+        #ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        ckptr = ocp.StandardCheckpointer()
+        ckptr.save(fpath, other_state)
+
+    @classmethod
+    def from_checkpoint(cls, fpath: str, rngs: nnx.Rngs):
+        checkpointer = ocp.StandardCheckpointer()
+        model = GPT2(GPTConfig(), rngs=rngs)
+        _, _, other_state = nnx.split(model, nnx.RngState, ...)
+        other_state = checkpointer.restore(fpath, target=other_state) 
+        nnx.update(model, other_state)
+        return model
 
     @classmethod
     def from_pretrained(cls, rngs: nnx.Rngs):
