@@ -199,21 +199,21 @@ class GPT2(nnx.Module):
         logits = x @ jnp.transpose(self.lm_head.value, (1, 0))
         return logits
 
-    def save_checkpoint(self, fpath: str):
-        _, _, other_state = nnx.split(self, nnx.RngState, ...)
-        #ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-        ckptr = ocp.StandardCheckpointer()
-        ckptr.save(fpath, other_state)
+def save_checkpoint(model, fpath: str):
+    _, _, other_state = nnx.split(model, nnx.RngState, ...)
+    ckptr = ocp.StandardCheckpointer()
+    ckptr.save(fpath, other_state)
+    
 
-    @classmethod
-    def from_checkpoint(cls, fpath: str, rngs: nnx.Rngs):
-        checkpointer = ocp.StandardCheckpointer()
-        model = GPT2(GPTConfig(), rngs=rngs)
-        _, _, other_state = nnx.split(model, nnx.RngState, ...)
-        other_state = checkpointer.restore(fpath, target=other_state) 
-        nnx.update(model, other_state)
-        return model
+def from_checkpoint(fpath: str, rngs: nnx.Rngs):
+    checkpointer = ocp.StandardCheckpointer()
+    model = GPT2(GPTConfig(), rngs=rngs)
+    _, _, other_state = nnx.split(model, nnx.RngState, ...)
+    other_state = checkpointer.restore(fpath, target=other_state) 
+    nnx.update(model, other_state)
+    return model
 
+'''
     @classmethod
     def from_pretrained(cls, rngs: nnx.Rngs):
         config = GPTConfig()
@@ -258,3 +258,4 @@ class GPT2(nnx.Module):
                     model = nnx.merge(graphdef, sd)
 
         return model, model_hf
+'''
