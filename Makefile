@@ -95,7 +95,7 @@ jupyter-ssh-tunnel:
 
 # Run Jupyter lab
 lab:
-	cd notebooks && uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=8888
+	cd notebooks && nohup uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=8888 > jupyter.log 2>&1 &
 
 # Help command
 help:
