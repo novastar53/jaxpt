@@ -20,7 +20,7 @@ import orbax.checkpoint as ocp
 class GPTConfig:
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
-    vocab_size: int = 50257  # tiktoken bpe encoded text
+    vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
