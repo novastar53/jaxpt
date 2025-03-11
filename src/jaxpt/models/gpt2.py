@@ -1,3 +1,4 @@
+from typing import Literal
 from dataclasses import dataclass
 from functools import partial
 
@@ -28,6 +29,7 @@ class GPTConfig:
     resid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
     ln_epsilon: float = 1e-5
+    sdpa_implementation: Literal["xla", "cudnn"] = "xla"
 
 #@partial(jax.jit, static_argnames=("approximate",))
 #def mygelu(x, approximate=True):
@@ -64,10 +66,11 @@ class CausalSelfAttention(nnx.Module):
             )
         )
         
-        self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
+        #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
-        self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
+        #self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
         #self.rngs = rngs
+        self.implementation = config.sdpa_implementation
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -97,12 +100,13 @@ class CausalSelfAttention(nnx.Module):
         #y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
 
 
-
+        # alternative impolementations
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
         #y = causal_flash_attention(q, k, v)
         #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
-        y = jax.nn.dot_product_attention(q, k, v, is_causal=True)
+        y = jax.nn.dot_product_attention(q, k, v, is_causal=True,
+                                          implementation=self.implementation)
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
