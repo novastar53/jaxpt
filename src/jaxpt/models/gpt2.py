@@ -27,6 +27,7 @@ class GPTConfig:
     attn_pdrop: float = 0.1
     resid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
+    ln_epsilon: float = 1e-5
 
 #@partial(jax.jit, static_argnames=("approximate",))
 #def mygelu(x, approximate=True):
@@ -134,9 +135,9 @@ class MLP(nnx.Module):
 
 class Block(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.ln_1 = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
+        self.ln_1 = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
         self.attn = CausalSelfAttention(config, rngs=rngs)
-        self.ln_2 = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
+        self.ln_2 = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
         self.mlp = MLP(config, rngs=rngs)
 
     def __call__(self, x):
@@ -164,7 +165,7 @@ class GPT2(nnx.Module):
         )
         self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
-        self.ln_f = nnx.LayerNorm(config.n_embed, dtype=config.dtype, rngs=rngs)
+        self.ln_f = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
 
     def __call__(self, idx):
         T = idx.shape[1]
