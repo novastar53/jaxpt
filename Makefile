@@ -91,11 +91,11 @@ list:
 	uv pip list
 
 jupyter-ssh-tunnel:
-	ssh -L 8888:localhost:8888 -i '${keyfile}' ubuntu@${host}
+	ssh -L 8888:localhost:8888 -i '${k}' ubuntu@${h}
 
 # Run Jupyter lab
 lab:
-	cd notebooks && uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=8888
+	cd notebooks && nohup uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=8888 > jupyter.log 2>&1 &
 
 # Help command
 help:
