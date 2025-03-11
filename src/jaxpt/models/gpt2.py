@@ -28,9 +28,9 @@ class GPTConfig:
     resid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
 
-@partial(jax.jit, static_argnames=("approximate",))
-def mygelu(x, approximate=True):
-    return nnx.gelu(x, approximate=approximate)
+#@partial(jax.jit, static_argnames=("approximate",))
+#def mygelu(x, approximate=True):
+#    return nnx.gelu(x, approximate=approximate)
 
 class CausalSelfAttention(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
@@ -66,7 +66,7 @@ class CausalSelfAttention(nnx.Module):
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
         #self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
-        self.rngs = rngs
+        #self.rngs = rngs
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -126,7 +126,7 @@ class MLP(nnx.Module):
 
     def __call__(self, x):
         x = self.c_fc(x)
-        x = mygelu(x)
+        x = nnx.gelu(x, approimate=True)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -168,7 +168,7 @@ class Transformer(nnx.Module):
 
     def __call__(self, idx):
         T = idx.shape[1]
-        pos = jnp.arange(0, T, dtype=jnp.int16)
+        pos = jnp.arange(0, T, dtype=jnp.uint16)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
         x = self.dropout(tok_emb + pos_emb)
