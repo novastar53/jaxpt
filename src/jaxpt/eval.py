@@ -103,5 +103,7 @@ if __name__ == "__main__":
         total += 1
         if correct == total:
             correct += 1
+        if total % 100 == 0:
+            print(f"Correct {correct} | Total {total}")
     
     print(f"Accuracy: {100*correct/total}%")

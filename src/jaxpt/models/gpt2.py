@@ -55,17 +55,17 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        #self.mask = nnx.Variable(
-        #    jnp.tril(
-        #        jnp.ones(
-        #            (config.block_size, config.block_size), dtype=config.dtype
-        #        ).reshape((1, 1, config.block_size, config.block_size))
-        #    )
-        #)
+        self.mask = nnx.Variable(
+            jnp.tril(
+                jnp.ones(
+                    (config.block_size, config.block_size), dtype=config.dtype
+                ).reshape((1, 1, config.block_size, config.block_size))
+            )
+        )
         
-        #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
+        self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
-        #self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
+        self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
         #self.rngs = rngs
 
     def __call__(self, x):
@@ -76,27 +76,27 @@ class CausalSelfAttention(nnx.Module):
         q = jnp.reshape(
             q, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
-        # q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+        q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         k = jnp.reshape(
             k, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
-        # k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+        k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         v = jnp.reshape(
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
-        # v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+        v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
-        # att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / math.sqrt(k.shape[-1])  # B, n_head, T, T
-        # att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
-        # att = jax.nn.softmax(att, axis=-1)
-        # att = self.attn_dropout(att)
-        # y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
-        # y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+        att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / jnp.sqrt(k.shape[-1])  # B, n_head, T, T
+        att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
+        att = jax.nn.softmax(att, axis=-1)
+        att = self.attn_dropout(att)
+        y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
+        y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
-        y = causal_flash_attention(q, k, v)
+        #y = causal_flash_attention(q, k, v)
         #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
