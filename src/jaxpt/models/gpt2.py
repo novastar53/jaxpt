@@ -126,7 +126,7 @@ class MLP(nnx.Module):
 
     def __call__(self, x):
         x = self.c_fc(x)
-        x = nnx.gelu(x, approimate=True)
+        x = nnx.gelu(x, approximate=True)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
