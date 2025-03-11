@@ -145,7 +145,7 @@ class Block(nnx.Module):
         return x
 
 
-class Transformer(nnx.Module):
+class GPT2(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
@@ -175,29 +175,9 @@ class Transformer(nnx.Module):
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
-        return x
-
-
-class GPT2(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.config = config
-        self.transformer = Transformer(config, rngs=rngs)
-        # weight sharing scheme
-        # self.lm_head = nnx.Linear(config.n_embed, config.vocab_size,
-        #                          dtype=config.dtype,
-        #                          use_bias=False,
-        #                          rngs=rngs)
-        #
-        self.lm_head = self.transformer.wte.embedding
-
-        # assert(id(self.lm_head.kernel.value) == id(self.transformer.wte.embedding.value))
-
-    def __call__(self, idx):
-        T = idx.shape[1]
-        assert T <= self.config.block_size
-        x = self.transformer(idx)
-        logits = x @ jnp.transpose(self.lm_head.value, (1, 0))
+        logits = self.wte.attend(x) # (B x T x V)
         return logits
+
 
 def save_checkpoint(model, fpath: str):
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
