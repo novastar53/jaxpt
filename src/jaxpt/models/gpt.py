@@ -11,8 +11,6 @@ from jax.experimental import mesh_utils
 from jaxpt.utils import count_params, update_param, get_param
 
 from transformers import GPT2LMHeadModel
-from flash_attention_jax import causal_flash_attention
-#import jax.experimental.pallas.ops.gpu.attention as pallas_attn
 import orbax.checkpoint as ocp
 
 
@@ -31,9 +29,6 @@ class GPTConfig:
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
 
-#@partial(jax.jit, static_argnames=("approximate",))
-#def mygelu(x, approximate=True):
-#    return nnx.gelu(x, approximate=approximate)
 
 class CausalSelfAttention(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
@@ -58,13 +53,13 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
-            )
-        )
+        #self.mask = nnx.Variable(
+        #    jnp.tril(
+        #        jnp.ones(
+        #            (config.block_size, config.block_size), dtype=config.dtype
+        #        ).reshape((1, 1, config.block_size, config.block_size))
+        #    )
+        #)
         
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
@@ -80,16 +75,17 @@ class CausalSelfAttention(nnx.Module):
         q = jnp.reshape(
             q, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
-        #q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         k = jnp.reshape(
             k, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
-        #k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         v = jnp.reshape(
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
+
+        #q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
+        #k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
         #v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
 
         #att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / jnp.sqrt(k.shape[-1])  # B, n_head, T, T
@@ -99,13 +95,13 @@ class CausalSelfAttention(nnx.Module):
         #y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
         #y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
 
-
         # alternative implementations
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
         #y = causal_flash_attention(q, k, v)
         #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
 
+        # Ended up using the jax.nn implementation because it has a fused kernel
         # based on https://github.com/MasterSkepticista/gpt2/blob/5799d821b71c25d57f97159835a516689b3fe607/model.py
         # he hasn't used dropout in the attention weights. hopefully it won't affect accuracy
         # too much
@@ -158,10 +154,9 @@ class Block(nnx.Module):
         return x
 
 
-class GPT2(nnx.Module):
+class GPT(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
-        print(config.dtype)
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
@@ -179,7 +174,8 @@ class GPT2(nnx.Module):
         )
         self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
-        self.ln_f = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
+        self.ln_f = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, 
+                                  dtype=config.dtype, rngs=rngs)
 
     def __call__(self, idx):
         T = idx.shape[1]
@@ -202,7 +198,7 @@ def save_checkpoint(model, fpath: str):
 
 def from_checkpoint(fpath: str, rngs: nnx.Rngs):
     checkpointer = ocp.StandardCheckpointer()
-    model = GPT2(GPTConfig(), rngs=rngs)
+    model = GPT(GPTConfig(), rngs=rngs)
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     other_state = checkpointer.restore(fpath, target=other_state) 
     nnx.update(model, other_state)
