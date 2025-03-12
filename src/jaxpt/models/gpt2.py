@@ -100,7 +100,7 @@ class CausalSelfAttention(nnx.Module):
         #y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
 
 
-        # alternative impolementations
+        # alternative implementations
         #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
         #y = causal_flash_attention(q, k, v)
