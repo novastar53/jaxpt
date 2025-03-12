@@ -161,7 +161,6 @@ class Block(nnx.Module):
 class GPT2(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
-        print(config.dtype)
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
