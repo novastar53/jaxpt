@@ -105,8 +105,12 @@ class CausalSelfAttention(nnx.Module):
         #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
         #y = causal_flash_attention(q, k, v)
         #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
+
+        # based on https://github.com/MasterSkepticista/gpt2/blob/5799d821b71c25d57f97159835a516689b3fe607/model.py
+        # he hasn't used dropout in the attention weights. hopefully it won't affect accuracy
+        # too much
         y = jax.nn.dot_product_attention(q, k, v, is_causal=True,
-                                          implementation=self.implementation)
+                                          implementation=self.implementation) 
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.resid_dropout(self.c_proj(y))
@@ -157,11 +161,13 @@ class Block(nnx.Module):
 class GPT2(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
+        print(config.dtype)
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
             embedding_init=nnx.initializers.normal(stddev=0.02),
             dtype=config.dtype,
+            param_dtype=config.dtype,
             rngs=rngs,
         )
         self.wpe = nnx.Embed(
