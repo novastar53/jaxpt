@@ -1,5 +1,6 @@
 import time
 import os
+import sys
 import requests
 import json
 import pandas as pd
@@ -13,7 +14,7 @@ import tiktoken
 from datasets import load_dataset
 import optax
 
-from jaxpt.models import GPT, from_checkpoint
+from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained
 
 dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 DATA_CACHE_DIR = Path() / "hellaswag"
@@ -92,18 +93,20 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--run", default="run_20250313_tywkeh")
-    parser.add_argument("--chkpt", default="checkpoint-128.pt")
+    parser.add_argument("--run", default="run_20250312_kpsqxx")
+    parser.add_argument("--chkpt", default="checkpoint-18882.pt")
 
     args = parser.parse_args()
 
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
-    checkpoint = Path("/") / "checkpoints" / args.run / args.chkpt
-    model = from_checkpoint(checkpoint, rngs=rngs)
+    checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
+    #model = from_checkpoint(checkpoint, rngs=rngs)
+    model = from_huggingface_pretrained(rngs=rngs)
     model.eval()
 
     hellaswag = HellaSwag(model)
+
     total, correct = 0, 0
     start = time.time()
     for example, pred, label in hellaswag:
@@ -119,6 +122,6 @@ if __name__ == "__main__":
         if total % 100 == 0:
             delta = time.time() - start
             rate = total / delta
-            print(f"correct {correct} | total {total} | acc {100*correct/total:0.2f}% | rate {rate:0.4f}/sec ")
+            print(f"correct {correct} | total {total} | acc {100*correct/total:0.2f}% | rate {rate:0.1f}/sec ")
     
     print(f"Accuracy: {100*correct/total}%")
