@@ -1,6 +1,8 @@
+import time
 import os
 import requests
 import json
+import pandas as pd
 
 from pathlib import Path
 
@@ -11,10 +13,10 @@ import tiktoken
 from datasets import load_dataset
 import optax
 
-from jaxpt.models import GPT2
+from jaxpt.models import GPT, from_checkpoint
 
 dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl",
-DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "hellaswag")
+DATA_CACHE_DIR = Path() / "hellaswag"
 
 def _download_hellaswag():
     os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -48,6 +50,7 @@ class HellaSwag:
         _download_hellaswag()
         self.file = open(os.path.join(DATA_CACHE_DIR, f"hellaswag_val.jsonl"), "r")
         self.tokenizer = tiktoken.get_encoding("gpt2")
+        self.batch_size = 4
         self.idx = 0
         self.model = model
 
@@ -87,12 +90,13 @@ class HellaSwag:
 if __name__ == "__main__":
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
-    checkpoint = Path().absolute() / "checkpoints" / "run_20250310_yffvuj" / "checkpoint-199.pt"
-    model = GPT2.from_checkpoint(checkpoint, rngs=rngs)
+    checkpoint = Path().absolute().parent.parent / "checkpoints" / "run_20250313_btnpwz" / "checkpoint-128.pt"
+    model = from_checkpoint(checkpoint, rngs=rngs)
     model.eval()
 
     hellaswag = HellaSwag(model)
     total, correct = 0, 0
+    start = time.time()
     for example, pred, label in hellaswag:
         #print(example["ctx"])
         #for ending in example["endings"]:
@@ -101,9 +105,11 @@ if __name__ == "__main__":
         #print("----------")
         print(f"Processed: {total}", end="\r")
         total += 1
-        if correct == total:
+        if pred == label:
             correct += 1
         if total % 100 == 0:
-            print(f"Correct {correct} | Total {total}")
+            delta = time.time() - start
+            rate = total / delta
+            print(f"correct {correct} | total {total} | acc {100*correct/total:0.2f}% | rate {rate:0.4f}/sec ")
     
     print(f"Accuracy: {100*correct/total}%")
