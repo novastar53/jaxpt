@@ -15,7 +15,7 @@ import optax
 
 from jaxpt.models import GPT, from_checkpoint
 
-dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl",
+dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 DATA_CACHE_DIR = Path() / "hellaswag"
 
 def _download_hellaswag():
@@ -88,9 +88,18 @@ class HellaSwag:
 
 
 if __name__ == "__main__":
+
+    import argparse
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--run", default="run_20250313_tywkeh")
+    parser.add_argument("--chkpt", default="checkpoint-128.pt")
+
+    args = parser.parse_args()
+
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
-    checkpoint = Path().absolute().parent.parent / "checkpoints" / "run_20250313_btnpwz" / "checkpoint-128.pt"
+    checkpoint = Path("/") / "checkpoints" / args.run / args.chkpt
     model = from_checkpoint(checkpoint, rngs=rngs)
     model.eval()
 
