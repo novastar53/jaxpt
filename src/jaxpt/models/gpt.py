@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 from dataclasses import dataclass
 from functools import partial
 
@@ -84,6 +84,7 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
+        # standard sdpa implementation
         #q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
         #k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
         #v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
@@ -196,10 +197,11 @@ def save_checkpoint(model, fpath: str):
     ckptr.save(fpath, other_state)
     
 
-def from_checkpoint(fpath: str, rngs: nnx.Rngs):
-    checkpointer = ocp.StandardCheckpointer()
-    model = GPT(GPTConfig(), rngs=rngs)
+def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
+    config = config if config else GPTConfig()
+    model = GPT(config=config, rngs=rngs)
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
+    checkpointer = ocp.StandardCheckpointer()
     other_state = checkpointer.restore(fpath, target=other_state) 
     nnx.update(model, other_state)
     return model

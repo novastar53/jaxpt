@@ -16,7 +16,7 @@ import tiktoken
 from datasets import load_dataset
 import optax
 
-from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained
+from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained, GPTConfig
 from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
 dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
@@ -77,12 +77,15 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
-        mask = jnp.zeros((len(endings), len(prompt_tokens) + max(len(ending) for ending in endings)))
-        tokens = jnp.zeros((len(endings), len(prompt_tokens) + max(len(ending) for ending in endings)))
+        len_prompt = len(prompt_tokens)
+        max_ending_len = max(len(ending) for ending in endings)
+        mask = jnp.zeros((len(endings), len_prompt + max_ending_len))
+        tokens = jnp.zeros((len(endings), len_prompt + max_ending_len), dtype=jnp.int32)
         for i in range(len(endings)):
             ending_tokens = self.tokenizer.encode(" " + endings[i])
-            tokens = tokens.at[i, :len(prompt_tokens) + len(ending_tokens[i])].set(prompt_tokens + ending_tokens[i])
-            mask = mask.at[i, :len(prompt_tokens) + len(ending_tokens[i])].set(jnp.ones(len(prompt_tokens) + len(ending_tokens[i])))
+            len_tokens = len(prompt_tokens) + len(ending_tokens)
+            tokens = tokens.at[i, :len_tokens].set(prompt_tokens + ending_tokens)
+            mask = mask.at[i, :len_tokens].set(jnp.ones(len_tokens))
             mask = mask.at[i, :len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
 
         return tokens, mask, label
@@ -105,7 +108,8 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
     checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
-    model = from_checkpoint(checkpoint, rngs=rngs)
+    config = GPTConfig(vocab_size=50304, sdpa_implementation="xla")
+    model = from_checkpoint(checkpoint, rngs=rngs, config=config)
     #model = from_huggingface_pretrained(rngs=rngs)
     #model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.eval()
