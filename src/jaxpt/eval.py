@@ -104,11 +104,12 @@ if __name__ == "__main__":
     parser.add_argument("--chkpt", default="checkpoint-18882.pt")
 
     args = parser.parse_args()
-
+    
+    jax.config.update("jax_default_matmul_precision", "BF16_BF16_F32") 
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
-    checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
-    config = GPTConfig(vocab_size=50304, sdpa_implementation="xla")
+    checkpoint = Path("/home/ubuntu/gpt2-train").absolute() / "checkpoints" / args.run / args.chkpt
+    config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="cudnn")
     model = from_checkpoint(checkpoint, rngs=rngs, config=config)
     #model = from_huggingface_pretrained(rngs=rngs)
     #model = GPT2LMHeadModel.from_pretrained("gpt2")
@@ -128,7 +129,7 @@ if __name__ == "__main__":
         total += 1
         correct += int(pred == label)
 
-        if total % 100 == 0:
+        if total % 1 == 0:
             delta = time.time() - start
             rate = total / delta
             print(f"correct {correct} | total {total} | acc {100*correct/total:0.2f}% | rate {rate:0.1f}/sec ")
