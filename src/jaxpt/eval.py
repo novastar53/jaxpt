@@ -4,9 +4,11 @@ import sys
 import requests
 import json
 import pandas as pd
+from typing import overload
 
 from pathlib import Path
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
@@ -15,6 +17,7 @@ from datasets import load_dataset
 import optax
 
 from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained
+from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
 dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 DATA_CACHE_DIR = Path() / "hellaswag"
@@ -29,8 +32,10 @@ def _download_hellaswag():
             for data in resp.iter_content(chunk_size=1024):
                 file.write(data)
 
+
+
 @nnx.jit
-def _predict(model, tokens, mask):
+def _predict(model: GPT, tokens, mask):
     logits = model(tokens)
     logits = logits[:, :-1, :] # remove the last token
     logits_flat = logits.reshape(-1, logits.shape[-1])
@@ -46,8 +51,7 @@ def _predict(model, tokens, mask):
 
 
 class HellaSwag:
-    def __init__(self, model: nnx.Module):
-        #self.dataset = load_dataset("hellaswag", trust_remote_code=True, num_proc=0)
+    def __init__(self, model: GPT2LMHeadModel | FlaxGPT2LMHeadModel | GPT):
         _download_hellaswag()
         self.file = open(os.path.join(DATA_CACHE_DIR, f"hellaswag_val.jsonl"), "r")
         self.tokenizer = tiktoken.get_encoding("gpt2")
@@ -55,7 +59,6 @@ class HellaSwag:
         self.idx = 0
         self.model = model
 
-    
     def __iter__(self):
         return self
 
@@ -74,12 +77,13 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
-        endings_tokens = [self.tokenizer.encode(ending) for ending in endings]
-        mask = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.int16)
-        tokens = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.int16)
+        endings_tokens = [self.tokenizer.encode(" " + ending) for ending in endings]
+        mask = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.uint16)
+        tokens = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.uint16)
         for i in range(len(endings_tokens)):
             tokens = tokens.at[i, :len(prompt_tokens) + len(endings_tokens[i])].set(prompt_tokens + endings_tokens[i])
             mask = mask.at[i, :len(prompt_tokens) + len(endings_tokens[i])].set(jnp.ones(len(prompt_tokens) + len(endings_tokens[i])))
+            mask = mask.at[i, :len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
 
         return tokens, mask, label
 
@@ -101,8 +105,9 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
     checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
-    #model = from_checkpoint(checkpoint, rngs=rngs)
-    model = from_huggingface_pretrained(rngs=rngs)
+    model = from_checkpoint(checkpoint, rngs=rngs)
+    #model = from_huggingface_pretrained(rngs=rngs)
+    #model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.eval()
 
     hellaswag = HellaSwag(model)
@@ -115,10 +120,10 @@ if __name__ == "__main__":
         #    print(ending)
         #print(pred, label)
         #print("----------")
-        print(f"Processed: {total}", end="\r")
+        #print(f"Processed: {total}", end="\r")
         total += 1
-        if pred == label:
-            correct += 1
+        correct += int(pred == label)
+
         if total % 100 == 0:
             delta = time.time() - start
             rate = total / delta
