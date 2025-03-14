@@ -23,9 +23,6 @@ class GPTConfig:
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
-    attn_pdrop: float = 0.1
-    resid_pdrop: float = 0.1
-    embd_pdrop: float = 0.1
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
 
@@ -61,10 +58,6 @@ class CausalSelfAttention(nnx.Module):
             )
         )
         
-        #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
-        self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
-        #self.attn = partial(nnx.dot_product_attention, dropout_rate=config.attn_pdrop, dropout_rng=rngs.dropout.key.value)
-        #self.rngs = rngs
         self.implementation = config.sdpa_implementation
 
     def __call__(self, x):
@@ -84,33 +77,11 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        # standard sdpa implementation
-        #q = jnp.transpose(q, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
-        #k = jnp.transpose(k, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
-        #v = jnp.transpose(v, axes=(0, 2, 1, 3)) # B, n_head, T, C // n_head
-
-        #att = ( q @ jnp.transpose(k, axes=(0, 1, 3, 2))) / jnp.sqrt(k.shape[-1])  # B, n_head, T, T
-        #att = jnp.where(self.mask[:, :, :T, :T] == 0.0, float('-inf'), att)
-        #att = jax.nn.softmax(att, axis=-1)
-        #att = self.attn_dropout(att)
-        #y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
-        #y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
-
-        # alternative implementations
-        #y = self.attn(query=q, key=k, value=v, mask=self.mask[:, :, :T, :T]) 
-        #y = pallas_attn.mha(q, k, v, segment_ids=None, causal=True)
-        #y = causal_flash_attention(q, k, v)
-        #y = self.attn(q, k, v, mask=self.mask[:, :, :T, :T])
-
-        # Ended up using the jax.nn implementation because it has a fused kernel
-        # based on https://github.com/MasterSkepticista/gpt2/blob/5799d821b71c25d57f97159835a516689b3fe607/model.py
-        # he hasn't used dropout in the attention weights. hopefully it won't affect accuracy
-        # too much
         y = jax.nn.dot_product_attention(q, k, v, is_causal=True,
                                           implementation=self.implementation) 
         
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
-        y = self.resid_dropout(self.c_proj(y))
+        y = self.c_proj(y)
         return y
 
 
@@ -127,18 +98,16 @@ class MLP(nnx.Module):
         self.c_proj = nnx.Linear(
             4 * config.n_embed,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
+            kernel_init=nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
             bias_init=nnx.initializers.zeros,
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
 
     def __call__(self, x):
         x = self.c_fc(x)
         x = nnx.gelu(x, approximate=True)
         x = self.c_proj(x)
-        x = self.dropout(x)
         return x
 
 
@@ -173,7 +142,6 @@ class GPT(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.dropout = nnx.Dropout(config.embd_pdrop, rngs=rngs)
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, 
                                   dtype=config.dtype, rngs=rngs)
@@ -183,7 +151,7 @@ class GPT(nnx.Module):
         pos = jnp.arange(0, T, dtype=jnp.uint16)
         pos_emb = self.wpe(pos)
         tok_emb = self.wte(idx)
-        x = self.dropout(tok_emb + pos_emb)
+        x = tok_emb + pos_emb
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
