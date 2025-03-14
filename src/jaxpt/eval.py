@@ -77,14 +77,15 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
+        ending_tokens = [ self.tokenizer.encode(" " + ending) for ending in endings ]
+
         len_prompt = len(prompt_tokens)
         max_ending_len = max(len(ending) for ending in endings)
         mask = jnp.zeros((len(endings), len_prompt + max_ending_len))
         tokens = jnp.zeros((len(endings), len_prompt + max_ending_len), dtype=jnp.int32)
         for i in range(len(endings)):
-            ending_tokens = self.tokenizer.encode(" " + endings[i])
-            len_tokens = len(prompt_tokens) + len(ending_tokens)
-            tokens = tokens.at[i, :len_tokens].set(prompt_tokens + ending_tokens)
+            len_tokens = len(prompt_tokens) + len(ending_tokens[i])
+            tokens = tokens.at[i, :len_tokens].set(prompt_tokens + ending_tokens[i])
             mask = mask.at[i, :len_tokens].set(jnp.ones(len_tokens))
             mask = mask.at[i, :len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
 
@@ -102,14 +103,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--run", default="run_20250312_kpsqxx")
     parser.add_argument("--chkpt", default="checkpoint-18882.pt")
-
+    parser.add_argument("--datadir", default="")
     args = parser.parse_args()
     
     jax.config.update("jax_default_matmul_precision", "BF16_BF16_F32") 
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
-    checkpoint = Path("/home/ubuntu/gpt2-train").absolute() / "checkpoints" / args.run / args.chkpt
-    config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="cudnn")
+    checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
+    config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla")
     model = from_checkpoint(checkpoint, rngs=rngs, config=config)
     #model = from_huggingface_pretrained(rngs=rngs)
     #model = GPT2LMHeadModel.from_pretrained("gpt2")
