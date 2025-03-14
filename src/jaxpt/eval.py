@@ -77,12 +77,12 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
-        endings_tokens = [self.tokenizer.encode(" " + ending) for ending in endings]
-        mask = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.uint16)
-        tokens = jnp.zeros((len(endings_tokens), len(prompt_tokens) + max(len(ending) for ending in endings_tokens)), dtype=jnp.uint16)
-        for i in range(len(endings_tokens)):
-            tokens = tokens.at[i, :len(prompt_tokens) + len(endings_tokens[i])].set(prompt_tokens + endings_tokens[i])
-            mask = mask.at[i, :len(prompt_tokens) + len(endings_tokens[i])].set(jnp.ones(len(prompt_tokens) + len(endings_tokens[i])))
+        mask = jnp.zeros((len(endings), len(prompt_tokens) + max(len(ending) for ending in endings)))
+        tokens = jnp.zeros((len(endings), len(prompt_tokens) + max(len(ending) for ending in endings)))
+        for i in range(len(endings)):
+            ending_tokens = self.tokenizer.encode(" " + endings[i])
+            tokens = tokens.at[i, :len(prompt_tokens) + len(ending_tokens[i])].set(prompt_tokens + ending_tokens[i])
+            mask = mask.at[i, :len(prompt_tokens) + len(ending_tokens[i])].set(jnp.ones(len(prompt_tokens) + len(ending_tokens[i])))
             mask = mask.at[i, :len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
 
         return tokens, mask, label

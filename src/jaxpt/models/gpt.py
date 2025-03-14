@@ -19,7 +19,7 @@ import orbax.checkpoint as ocp
 class GPTConfig:
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
-    vocab_size: int = 50257 #  50304  # 50257 padded to the nearest multiple of 64
+    vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
@@ -53,13 +53,13 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        #self.mask = nnx.Variable(
-        #    jnp.tril(
-        #        jnp.ones(
-        #            (config.block_size, config.block_size), dtype=config.dtype
-        #        ).reshape((1, 1, config.block_size, config.block_size))
-        #    )
-        #)
+        self.mask = nnx.Variable(
+            jnp.tril(
+                jnp.ones(
+                    (config.block_size, config.block_size), dtype=config.dtype
+                ).reshape((1, 1, config.block_size, config.block_size))
+            )
+        )
         
         #self.attn_dropout = nnx.Dropout(config.attn_pdrop, rngs=rngs)
         self.resid_dropout = nnx.Dropout(config.resid_pdrop, rngs=rngs)
