@@ -1,18 +1,15 @@
 from typing import Literal, Optional
 from dataclasses import dataclass
-from functools import partial
 
 import torch
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
-from jax.experimental import mesh_utils
 
-from jaxpt.utils import count_params, update_param, get_param
+from jaxpt.utils import update_param, get_param
 
 from transformers import GPT2LMHeadModel
 import orbax.checkpoint as ocp
-
 
 
 @dataclass
@@ -57,7 +54,7 @@ class CausalSelfAttention(nnx.Module):
                 ).reshape((1, 1, config.block_size, config.block_size))
             )
         )
-        
+
         self.implementation = config.sdpa_implementation
 
     def __call__(self, x):
@@ -77,9 +74,10 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        y = jax.nn.dot_product_attention(q, k, v, is_causal=True,
-                                          implementation=self.implementation) 
-        
+        y = jax.nn.dot_product_attention(
+            q, k, v, is_causal=True, implementation=self.implementation
+        )
+
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)
         return y
@@ -98,7 +96,9 @@ class MLP(nnx.Module):
         self.c_proj = nnx.Linear(
             4 * config.n_embed,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
+            kernel_init=nnx.initializers.normal(
+                stddev=0.02 * (2 * config.n_layer) ** -0.5
+            ),
             bias_init=nnx.initializers.zeros,
             dtype=config.dtype,
             rngs=rngs,
@@ -113,9 +113,13 @@ class MLP(nnx.Module):
 
 class Block(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.ln_1 = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
+        self.ln_1 = nnx.LayerNorm(
+            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+        )
         self.attn = CausalSelfAttention(config, rngs=rngs)
-        self.ln_2 = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs)
+        self.ln_2 = nnx.LayerNorm(
+            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+        )
         self.mlp = MLP(config, rngs=rngs)
 
     def __call__(self, x):
@@ -143,8 +147,9 @@ class GPT(nnx.Module):
             rngs=rngs,
         )
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
-        self.ln_f = nnx.LayerNorm(config.n_embed, epsilon=config.ln_epsilon, 
-                                  dtype=config.dtype, rngs=rngs)
+        self.ln_f = nnx.LayerNorm(
+            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+        )
 
     def __call__(self, idx):
         T = idx.shape[1]
@@ -155,7 +160,7 @@ class GPT(nnx.Module):
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
-        logits = self.wte.attend(x) # (B x T x V)
+        logits = self.wte.attend(x)  # (B x T x V)
         return logits
 
 
@@ -163,14 +168,14 @@ def save_checkpoint(model, fpath: str):
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     ckptr = ocp.StandardCheckpointer()
     ckptr.save(fpath, other_state)
-    
+
 
 def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
     config = config if config else GPTConfig()
     model = GPT(config=config, rngs=rngs)
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     checkpointer = ocp.StandardCheckpointer()
-    other_state = checkpointer.restore(fpath, target=other_state) 
+    other_state = checkpointer.restore(fpath, target=other_state)
     nnx.update(model, other_state)
     return model
 
@@ -186,10 +191,9 @@ def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
     hf_keys = [k for k in sd_hf]
     transposed = ["lm_head.weight"]
 
-    #assert len(sd_hf) == count_params(sd)
+    # assert len(sd_hf) == count_params(sd)
 
     for k in hf_keys:
-
         # map pytorch keys to flax keys
         jax_k = k
         if "lm_head" in jax_k:
@@ -203,7 +207,7 @@ def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
             jax_k = jax_k.replace("weight", "scale")
         else:
             jax_k = jax_k.replace("weight", "kernel")
-        
+
         with torch.no_grad():
             hf_param = sd_hf[k].detach().cpu().numpy()
             jax_param = get_param(sd, jax_k).value
