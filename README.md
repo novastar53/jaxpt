@@ -28,8 +28,13 @@ To see all available commands and their descriptions, run: `make help`
 ### Training
 
 The training run can be reproduced using `notebooks/train_gpt2.ipynb`
+A machine with 8 x Nvidia A100 80GB GPUs used to train for 1 epoch on a 10bn token sample of the 
+Fineweb-Edu dataset. Validation was performed on 1% of the dataset. 
+The trained model was evaluated on the Hellaswag benchmark.
 
 ### Results
+
+The trained model achieved a score of 0.3025 on the Hellaswag benchmark.
 
 ![Training Curve](./gpt2_135mm_fineweb-edu_14_03_2025-1.png)
 ![Zoomed In](./gpt2_135mm_fineweb-edu_14_03_2025-2.png)
