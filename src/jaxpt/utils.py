@@ -4,19 +4,21 @@ from flax import nnx
 
 # Logging
 
+
 def append_to_csv(file_path, row):
     """
     Appends a single row to a CSV file.
-    
+
     :param file_path: Path to the CSV file.
     :param row: A list or tuple representing the row to append.
     """
-    with open(file_path, mode='a', newline='', encoding='utf-8') as file:
+    with open(file_path, mode="a", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(row)
 
 
 # Model State PyTree Manipulation
+
 
 def get_param(state: nnx.statelib.State, path: str) -> nnx.variablelib.VariableState:
     keys = path.split(".")
