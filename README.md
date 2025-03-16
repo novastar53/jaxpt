@@ -25,6 +25,15 @@ The main commands available in the Makefile are:
 
 To see all available commands and their descriptions, run: `make help`
 
+### Training
+
+The training run can be reproduced using `notebooks/train_gpt2.ipynb`
+
+### Results
+
+![Training Curve](./gpt2_135mm_fineweb-edu_14_03_2025-1.png)
+![Zoomed In](./gpt2_135mm_fineweb-edu_14_03_2025-2.png)
+
 
 
 

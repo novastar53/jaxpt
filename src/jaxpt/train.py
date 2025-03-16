@@ -21,23 +21,23 @@ def train_step(model, optimizer, batch, targets):
     return loss, grads
 
 
-@nnx.pmap(axis_name='devices', in_axes=(None, None, 0, 0), out_axes=(0, 0))
+@nnx.pmap(axis_name="devices", in_axes=(None, None, 0, 0), out_axes=(0, 0))
 def parallel_train_step(model, optimizer, batch, targets):
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
-    loss = jax.lax.pmean(loss, axis_name='devices')
-    grads = jax.lax.pmean(grads, axis_name='devices')
+    loss = jax.lax.pmean(loss, axis_name="devices")
+    grads = jax.lax.pmean(grads, axis_name="devices")
     optimizer.update(grads)
     return loss, grads
 
 
-@nnx.pmap(axis_name='devices', in_axes=(None, None, 0, 0), out_axes=(0, 0, 0))
+@nnx.pmap(axis_name="devices", in_axes=(None, None, 0, 0), out_axes=(0, 0, 0))
 def accum_train_step(model, optimizer, batches, targets):
     accum_grads = None
     accum_loss = 0
     for batch, target in zip(batches, targets):
         loss, grads = nnx.value_and_grad(loss_fn)(model, batch, target)
-        loss = jax.lax.pmean(loss, axis_name='devices')
-        grads = jax.lax.pmean(grads, axis_name='devices')
+        loss = jax.lax.pmean(loss, axis_name="devices")
+        grads = jax.lax.pmean(grads, axis_name="devices")
         if accum_grads is None:
             accum_grads = grads
         else:

@@ -1,6 +1,5 @@
 from typing import Callable
 import os
-from pathlib import Path
 
 import jax
 import numpy as np
@@ -16,10 +15,18 @@ def load_text(path):
 
 
 class DataLoader:
-    def __init__(self, dirpath: str, batch_size: int, block_size: int, device_rank: int, label: str | None=None, quiet: bool=False):
+    def __init__(
+        self,
+        dirpath: str,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        label: str | None = None,
+        quiet: bool = False,
+    ):
         self.dirpath = dirpath
         self.enc = tiktoken.get_encoding("gpt2")
-        self.eot = self.enc._special_tokens['<|endoftext|>']
+        self.eot = self.enc._special_tokens["<|endoftext|>"]
 
         self.B = batch_size
         self.T = block_size
@@ -65,13 +72,14 @@ device rank:    {self.D}
 
         # if the shard has enough tokens remaining
         if self.shard_pos + buf_size < self.shard_size:
-            buf[:] = self.shard[self.shard_pos:self.shard_pos + buf_size]
+            buf[:] = self.shard[self.shard_pos : self.shard_pos + buf_size]
             self.shard_pos += buf_size
         else:
-            
             # load the remaining shard into the buffer
-            buf_prefix_size = (self.shard_size - self.shard_pos)
-            buf[:buf_prefix_size] = self.shard[self.shard_pos:self.shard_pos + buf_prefix_size]
+            buf_prefix_size = self.shard_size - self.shard_pos
+            buf[:buf_prefix_size] = self.shard[
+                self.shard_pos : self.shard_pos + buf_prefix_size
+            ]
             buf_pos = buf_prefix_size
 
             # if the remainder of the buffer is larger than the shard, load as many shards as needed
@@ -80,7 +88,7 @@ device rank:    {self.D}
                 for _ in range(n_shards):
                     self.cur_shard += 1
                     self.shard = self.__load_shard()
-                    buf[buf_pos :  buf_pos + self.shard_size] = self.shard
+                    buf[buf_pos : buf_pos + self.shard_size] = self.shard
                     buf_pos += self.shard_size
 
             # Load the next shard
@@ -89,7 +97,7 @@ device rank:    {self.D}
             self.shard_pos = 0
 
             # load the remainder of the buffer
-            buf[buf_pos:] = self.shard[:buf_size - buf_pos]
+            buf[buf_pos:] = self.shard[: buf_size - buf_pos]
             self.shard_pos = buf_size - buf_pos
 
         X = buf[:-1].reshape((self.D, self.B, self.T))

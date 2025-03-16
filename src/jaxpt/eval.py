@@ -2,8 +2,6 @@ import time
 import os
 import sys
 import requests
-import json
-import pandas as pd
 from typing import overload
 
 from pathlib import Path
@@ -19,8 +17,11 @@ import optax
 from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained, GPTConfig
 from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
-dataset_url =  "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
+dataset_url = (
+    "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
+)
 DATA_CACHE_DIR = Path() / "hellaswag"
+
 
 def _download_hellaswag():
     os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -28,18 +29,17 @@ def _download_hellaswag():
     if not os.path.exists(data_filename):
         print(f"Downloading {dataset_url} to {data_filename}...")
         resp = requests.get(dataset_url, stream=True)
-        with open(data_filename, "wb") as file: 
+        with open(data_filename, "wb") as file:
             for data in resp.iter_content(chunk_size=1024):
                 file.write(data)
-
 
 
 @nnx.jit
 def _predict(model: GPT, tokens, mask):
     logits = model(tokens)
-    logits = logits[:, :-1, :] # remove the last token
+    logits = logits[:, :-1, :]  # remove the last token
     logits_flat = logits.reshape(-1, logits.shape[-1])
-    tokens = tokens[:, 1:] # remove the first token
+    tokens = tokens[:, 1:]  # remove the first token
     tokens_flat = tokens.reshape(-1)
     losses = optax.softmax_cross_entropy_with_integer_labels(logits_flat, tokens_flat)
     mask = mask[..., 1:]
@@ -77,7 +77,7 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
-        ending_tokens = [ self.tokenizer.encode(" " + ending) for ending in endings ]
+        ending_tokens = [self.tokenizer.encode(" " + ending) for ending in endings]
 
         len_prompt = len(prompt_tokens)
         max_ending_len = max(len(ending) for ending in endings)
@@ -87,7 +87,7 @@ class HellaSwag:
             len_tokens = len(prompt_tokens) + len(ending_tokens[i])
             tokens = tokens.at[i, :len_tokens].set(prompt_tokens + ending_tokens[i])
             mask = mask.at[i, :len_tokens].set(jnp.ones(len_tokens))
-            mask = mask.at[i, :len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
+            mask = mask.at[i, : len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
 
         return tokens, mask, label
 
@@ -95,25 +95,24 @@ class HellaSwag:
         return len(self.valid)
 
 
-
 if __name__ == "__main__":
-
     import argparse
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--run", default="run_20250312_kpsqxx")
     parser.add_argument("--chkpt", default="checkpoint-18882.pt")
     parser.add_argument("--datadir", default="")
     args = parser.parse_args()
-    
-    jax.config.update("jax_default_matmul_precision", "BF16_BF16_F32") 
+
+    jax.config.update("jax_default_matmul_precision", "BF16_BF16_F32")
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
     checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
     config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla")
     model = from_checkpoint(checkpoint, rngs=rngs, config=config)
-    #model = from_huggingface_pretrained(rngs=rngs)
-    #model = GPT2LMHeadModel.from_pretrained("gpt2")
+    # model = from_huggingface_pretrained(rngs=rngs)
+    # model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.eval()
 
     hellaswag = HellaSwag(model)
@@ -121,18 +120,20 @@ if __name__ == "__main__":
     total, correct = 0, 0
     start = time.time()
     for example, pred, label in hellaswag:
-        #print(example["ctx"])
-        #for ending in example["endings"]:
+        # print(example["ctx"])
+        # for ending in example["endings"]:
         #    print(ending)
-        #print(pred, label)
-        #print("----------")
-        #print(f"Processed: {total}", end="\r")
+        # print(pred, label)
+        # print("----------")
+        # print(f"Processed: {total}", end="\r")
         total += 1
         correct += int(pred == label)
 
         if total % 1 == 0:
             delta = time.time() - start
             rate = total / delta
-            print(f"correct {correct} | total {total} | acc {100*correct/total:0.2f}% | rate {rate:0.1f}/sec ")
-    
-    print(f"Accuracy: {100*correct/total}%")
+            print(
+                f"correct {correct} | total {total} | acc {100 * correct / total:0.2f}% | rate {rate:0.1f}/sec "
+            )
+
+    print(f"Accuracy: {100 * correct / total}%")
