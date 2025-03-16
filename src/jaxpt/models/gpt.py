@@ -54,7 +54,6 @@ class CausalSelfAttention(nnx.Module):
                 ).reshape((1, 1, config.block_size, config.block_size))
             )
         )
-
         self.implementation = config.sdpa_implementation
 
     def __call__(self, x):
@@ -168,7 +167,6 @@ def save_checkpoint(model, fpath: str):
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     ckptr = ocp.StandardCheckpointer()
     ckptr.save(fpath, other_state)
-
 
 def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
     config = config if config else GPTConfig()
