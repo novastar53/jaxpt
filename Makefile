@@ -66,9 +66,6 @@ clean:
 	rm -rf notebooks/.ipynb_checkpoints/
 	rm -rf notebooks/**/.ipynb_checkpoints/
 
-# Build package
-build:
-	uv build .
 
 # Run linting
 lint:
@@ -85,6 +82,9 @@ wheel:
 # Create source distribution
 sdist:
 	uv build --sdist .
+
+# Build package
+build: wheel sdist
 
 # Show installed packages
 list:
