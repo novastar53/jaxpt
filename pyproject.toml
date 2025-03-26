@@ -7,7 +7,7 @@ name = "jaxpt"
 version = "0.1.0"
 description = "GPT models built with Jax"
 readme = "README.md"
-requires-python = "==3.12.4"
+requires-python = "==3.12.8"
 dependencies = [
     "datasets>=3.3.2",
     "flash-attention-jax>=0.3.1",

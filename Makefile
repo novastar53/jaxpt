@@ -1,7 +1,7 @@
 .PHONY: install clean build dev lint format sync all add add-dev remove regen-lock list lab help
 
 # Default Python version
-PYTHON_VERSION ?= 3.12.4
+PYTHON_VERSION ?= 3.12.8
 
 # Detect platform
 UNAME_M := $(shell uname -m)
