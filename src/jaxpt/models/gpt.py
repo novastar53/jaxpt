@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
+from jaxpt.modules import CausalSelfAttention, MLP
 from jaxpt.utils import update_param, get_param
 
 from transformers import GPT2LMHeadModel
@@ -13,7 +14,7 @@ import orbax.checkpoint as ocp
 
 
 @dataclass
-class GPTConfig:
+class Config:
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
@@ -24,94 +25,9 @@ class GPTConfig:
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
 
 
-class CausalSelfAttention(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.c_attn = nnx.Linear(
-            config.n_embed,
-            3 * config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        self.c_proj = nnx.Linear(
-            config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.initializers.normal(
-                stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-
-        self.n_head = config.n_head
-        self.n_embed = config.n_embed
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
-            )
-        )
-        self.implementation = config.sdpa_implementation
-
-    def __call__(self, x):
-        B, T, C = x.shape
-        qkv = self.c_attn(x)  # B, T, 3 * C
-        q, k, v = jnp.split(qkv, 3, axis=-1)  # 3 * (B, T, C)
-
-        q = jnp.reshape(
-            q, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
-
-        k = jnp.reshape(
-            k, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
-
-        v = jnp.reshape(
-            v, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
-
-        y = jax.nn.dot_product_attention(
-            q, k, v, is_causal=True, implementation=self.implementation
-        )
-
-        y = jnp.reshape(y, (B, T, C))  # (B, T, C)
-        y = self.c_proj(y)
-        return y
-
-
-class MLP(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
-        self.c_fc = nnx.Linear(
-            config.n_embed,
-            4 * config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        self.c_proj = nnx.Linear(
-            4 * config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.initializers.normal(
-                stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-
-    def __call__(self, x):
-        x = self.c_fc(x)
-        x = nnx.gelu(x, approximate=True)
-        x = self.c_proj(x)
-        return x
-
 
 class Block(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
@@ -128,7 +44,7 @@ class Block(nnx.Module):
 
 
 class GPT(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
             config.vocab_size,
@@ -168,8 +84,9 @@ def save_checkpoint(model, fpath: str):
     ckptr = ocp.StandardCheckpointer()
     ckptr.save(fpath, other_state)
 
-def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
-    config = config if config else GPTConfig()
+
+def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[Config]):
+    config = config if config else Config()
     model = GPT(config=config, rngs=rngs)
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     checkpointer = ocp.StandardCheckpointer()
@@ -179,7 +96,7 @@ def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
 
 
 def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
-    config = GPTConfig()
+    config = Config()
     model = GPT(config, rngs)
     graphdef, sd = nnx.split(model)
 
