@@ -14,7 +14,7 @@ import orbax.checkpoint as ocp
 
 
 @dataclass
-class Config:
+class GPTConfig:
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
@@ -27,7 +27,7 @@ class Config:
 
 
 class Block(nnx.Module):
-    def __init__(self, config: Config, rngs: nnx.Rngs):
+    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
@@ -44,7 +44,7 @@ class Block(nnx.Module):
 
 
 class GPT(nnx.Module):
-    def __init__(self, config: Config, rngs: nnx.Rngs):
+    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
             config.vocab_size,
@@ -85,8 +85,8 @@ def save_checkpoint(model, fpath: str):
     ckptr.save(fpath, other_state)
 
 
-def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[Config]):
-    config = config if config else Config()
+def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
+    config = config if config else GPTConfig()
     model = GPT(config=config, rngs=rngs)
     _, _, other_state = nnx.split(model, nnx.RngState, ...)
     checkpointer = ocp.StandardCheckpointer()
@@ -96,7 +96,7 @@ def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[Config]):
 
 
 def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
-    config = Config()
+    config = GPTConfig()
     model = GPT(config, rngs)
     graphdef, sd = nnx.split(model)
 
