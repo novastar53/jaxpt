@@ -3,9 +3,11 @@ from .charformer import Charformer
 from .gpt import (
     GPTConfig,
     GPT,
-    save_checkpoint,
-    from_checkpoint,
     from_huggingface_pretrained,
+)
+from .glu_gpt import (
+    GLUGPTConfig,
+    GLUGPT
 )
 
 __all__ = [
@@ -13,7 +15,5 @@ __all__ = [
     "Charformer",
     "GPTConfig",
     "GPT",
-    "save_checkpoint",
-    "from_checkpoint",
     "from_huggingface_pretrained",
 ]

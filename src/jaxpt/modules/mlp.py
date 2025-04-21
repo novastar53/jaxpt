@@ -1,9 +1,9 @@
-from dataclasses import _DataclassT
-
 import flax.nnx as nnx
 
+from jaxpt.modules import Config
+
 class GLUMLP(nnx.Module):
-    def __init__(self, config: _DataclassT, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
             config.n_embed,
             4 * config.n_embed,
@@ -41,7 +41,7 @@ class GLUMLP(nnx.Module):
 
 
 class MLP(nnx.Module):
-    def __init__(self, config: _DataclassT, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
             config.n_embed,
             4 * config.n_embed,

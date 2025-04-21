@@ -5,15 +5,14 @@ import torch
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from jaxpt.modules import CausalSelfAttention, GLUMLP
+from jaxpt.modules import CausalSelfAttention, GLUMLP, Config
 from jaxpt.utils import update_param, get_param
 
-from transformers import GPT2LMHeadModel
 import orbax.checkpoint as ocp
 
 
 @dataclass
-class GPTConfig:
+class GLUGPTConfig(Config):
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
@@ -26,7 +25,7 @@ class GPTConfig:
 
 
 class Block(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: GLUGPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
@@ -42,8 +41,8 @@ class Block(nnx.Module):
         return x
 
 
-class GPT(nnx.Module):
-    def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
+class GLUGPT(nnx.Module):
+    def __init__(self, config: GLUGPTConfig, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
             config.vocab_size,
@@ -78,69 +77,19 @@ class GPT(nnx.Module):
         return logits
 
 
-def save_checkpoint(model, fpath: str):
-    _, _, other_state = nnx.split(model, nnx.RngState, ...)
-    ckptr = ocp.StandardCheckpointer()
-    ckptr.save(fpath, other_state)
+    def save_checkpoint(self, fpath: str):
+        _, _, other_state = nnx.split(self, nnx.RngState, ...)
+        ckptr = ocp.StandardCheckpointer()
+        ckptr.save(fpath, other_state)
 
 
-def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
-    config = config if config else GPTConfig()
-    model = GPT(config=config, rngs=rngs)
-    _, _, other_state = nnx.split(model, nnx.RngState, ...)
-    checkpointer = ocp.StandardCheckpointer()
-    other_state = checkpointer.restore(fpath, target=other_state)
-    nnx.update(model, other_state)
-    return model
+    def from_checkpoint(self, fpath: str, rngs: nnx.Rngs, config=Optional[GLUGPTConfig]):
+        config = config if config else GLUGPTConfig()
+        model = GLUGPT(config=config, rngs=rngs)
+        _, _, other_state = nnx.split(model, nnx.RngState, ...)
+        checkpointer = ocp.StandardCheckpointer()
+        other_state = checkpointer.restore(fpath, target=other_state)
+        nnx.update(model, other_state)
+        return model
 
 
-def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
-    config = GPTConfig()
-    model = GPT(config, rngs)
-    graphdef, sd = nnx.split(model)
-
-    model_hf = GPT2LMHeadModel.from_pretrained("gpt2")
-    sd_hf = model_hf.state_dict()
-
-    hf_keys = [k for k in sd_hf]
-    transposed = ["lm_head.weight"]
-
-    # assert len(sd_hf) == count_params(sd)
-
-    for k in hf_keys:
-        # map pytorch keys to flax keys
-        jax_k = k
-        if "lm_head" in jax_k:
-            break
-        if "transformer" in jax_k:
-            jax_k = jax_k.replace("transformer.", "")
-
-        if "wte" in jax_k or "wpe" in jax_k:
-            jax_k = jax_k.replace("weight", "embedding")
-        elif "ln_" in jax_k:
-            jax_k = jax_k.replace("weight", "scale")
-        else:
-            jax_k = jax_k.replace("weight", "kernel")
-
-        with torch.no_grad():
-            hf_param = sd_hf[k].detach().cpu().numpy()
-            jax_param = get_param(sd, jax_k).value
-            if any(k.endswith(w) for w in transposed):
-                # special treatment for the Conv1D weights we need to transpose
-                sd = update_param(sd, jax_k, jnp.array(hf_param).T)
-                # check that the value was copied correctly
-                test_param = get_param(sd, jax_k).value
-                assert jnp.sum(test_param) == jnp.sum(hf_param.T)
-                assert jnp.sum(test_param) != jnp.sum(jax_param)
-                model = nnx.merge(graphdef, sd)
-
-            else:
-                # vanilla copy over the other parameters
-                sd = update_param(sd, jax_k, jnp.array(hf_param))
-                # check that the value was copied correctly
-                test_param = get_param(sd, jax_k)
-                assert jnp.sum(test_param.value) == jnp.sum(hf_param)
-                assert jnp.sum(test_param.value) != jnp.sum(jax_param)
-                model = nnx.merge(graphdef, sd)
-
-    return model

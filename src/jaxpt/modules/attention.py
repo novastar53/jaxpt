@@ -1,13 +1,12 @@
-from dataclasses import _DataClassT
-
-
 import jax
 import flax.nnx as nnx
 import jax.numpy as jnp
 
+from jaxpt.modules import Config
+
 
 class CausalSelfAttention(nnx.Module):
-    def __init__(self, config: _DataClassT, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_attn = nnx.Linear(
             config.n_embed,
             3 * config.n_embed,

@@ -5,15 +5,14 @@ import torch
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from jaxpt.modules import CausalSelfAttention, MLP
+from jaxpt.modules import CausalSelfAttention, MLP, Config
 from jaxpt.utils import update_param, get_param
 
 from transformers import GPT2LMHeadModel
 import orbax.checkpoint as ocp
 
-
 @dataclass
-class GPTConfig:
+class GPTConfig(Config):
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
@@ -78,20 +77,20 @@ class GPT(nnx.Module):
         return logits
 
 
-def save_checkpoint(model, fpath: str):
-    _, _, other_state = nnx.split(model, nnx.RngState, ...)
-    ckptr = ocp.StandardCheckpointer()
-    ckptr.save(fpath, other_state)
+    def save_checkpoint(self, fpath: str):
+        _, _, other_state = nnx.split(self, nnx.RngState, ...)
+        ckptr = ocp.StandardCheckpointer()
+        ckptr.save(fpath, other_state)
 
 
-def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
-    config = config if config else GPTConfig()
-    model = GPT(config=config, rngs=rngs)
-    _, _, other_state = nnx.split(model, nnx.RngState, ...)
-    checkpointer = ocp.StandardCheckpointer()
-    other_state = checkpointer.restore(fpath, target=other_state)
-    nnx.update(model, other_state)
-    return model
+    def from_checkpoint(self, fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
+        config = config if config else GPTConfig()
+        model = GPT(config=config, rngs=rngs)
+        _, _, other_state = nnx.split(model, nnx.RngState, ...)
+        checkpointer = ocp.StandardCheckpointer()
+        other_state = checkpointer.restore(fpath, target=other_state)
+        nnx.update(model, other_state)
+        return model
 
 
 def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
