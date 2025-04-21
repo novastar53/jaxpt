@@ -1,6 +1,6 @@
 from dataclasses import _DataclassT
 
-import jax.nnx as nnx
+import flax.nnx as nnx
 
 class MLP(nnx.Module):
     def __init__(self, config: _DataclassT, rngs: nnx.Rngs):

@@ -2,7 +2,6 @@ from typing import Literal, Optional
 from dataclasses import dataclass
 
 import torch
-import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 

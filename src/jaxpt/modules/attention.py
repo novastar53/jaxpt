@@ -2,7 +2,7 @@ from dataclasses import _DataClassT
 
 
 import jax
-import jax.nnx as nnx
+import flax.nnx as nnx
 import jax.numpy as jnp
 
 
