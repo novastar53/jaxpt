@@ -32,8 +32,8 @@ class GLUMLP(nnx.Module):
         )
 
     def __call__(self, x):
-        x = self.c_fc(x)
         g = nnx.sigmoid(self.gate(x))
+        x = self.c_fc(x)
         x = x * g
         x = self.c_proj(x)
         return x
