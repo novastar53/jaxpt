@@ -14,6 +14,8 @@ __all__ = [
     "Bigram",
     "Charformer",
     "GPTConfig",
+    "GLUGPTConfig",
     "GPT",
+    "GLUGPT",
     "from_huggingface_pretrained",
 ]
