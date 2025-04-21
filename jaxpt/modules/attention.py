@@ -1,0 +1,65 @@
+from dataclasses import _DataClassT
+
+
+import jax
+import jax.nnx as nnx
+import jax.numpy as jnp
+
+
+class CausalSelfAttention(nnx.Module):
+    def __init__(self, config: _DataClassT, rngs: nnx.Rngs):
+        self.c_attn = nnx.Linear(
+            config.n_embed,
+            3 * config.n_embed,
+            kernel_init=nnx.initializers.normal(stddev=0.02),
+            bias_init=nnx.initializers.zeros,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+        self.c_proj = nnx.Linear(
+            config.n_embed,
+            config.n_embed,
+            kernel_init=nnx.initializers.normal(
+                stddev=0.02 * (2 * config.n_layer) ** -0.5
+            ),
+            bias_init=nnx.initializers.zeros,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+
+        self.n_head = config.n_head
+        self.n_embed = config.n_embed
+        self.mask = nnx.Variable(
+            jnp.tril(
+                jnp.ones(
+                    (config.block_size, config.block_size), dtype=config.dtype
+                ).reshape((1, 1, config.block_size, config.block_size))
+            )
+        )
+        self.implementation = config.sdpa_implementation
+
+    def __call__(self, x):
+        B, T, C = x.shape
+        qkv = self.c_attn(x)  # B, T, 3 * C
+        q, k, v = jnp.split(qkv, 3, axis=-1)  # 3 * (B, T, C)
+
+        q = jnp.reshape(
+            q, (B, T, self.n_head, C // self.n_head)
+        )  # B, T, n_head, C // n_head
+
+        k = jnp.reshape(
+            k, (B, T, self.n_head, C // self.n_head)
+        )  # B, T, n_head, C // n_head
+
+        v = jnp.reshape(
+            v, (B, T, self.n_head, C // self.n_head)
+        )  # B, T, n_head, C // n_head
+
+        y = jax.nn.dot_product_attention(
+            q, k, v, is_causal=True, implementation=self.implementation
+        )
+
+        y = jnp.reshape(y, (B, T, C))  # (B, T, C)
+        y = self.c_proj(y)
+        return y
+
