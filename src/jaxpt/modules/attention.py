@@ -1,8 +1,23 @@
+import math
+
 import jax
 import flax.nnx as nnx
 import jax.numpy as jnp
 
 from jaxpt.modules import Config
+
+
+def calc_vanilla_attn(q, k, v, mask):
+    B, T, n_head, hs = q.shape
+    q = jnp.transpose(q, axes=(0, 2, 1, 3)) # (B, n_head, T, hs)
+    k = jnp.transpose(k, axes=(0, 2, 3, 1)) # (B, n_head, hs, T)
+    v = jnp.transpose(v, axes=(0, 2, 1, 3)) # (B, n_head, T, hs)
+    att = ( q @ k ) / math.sqrt(k.shape[-1])  # B, n_head, T, T
+    att = jnp.where(mask[:, :, :T, :T] == 0.0, float('-inf'), att)
+    att = jax.nn.softmax(att, axis=-1)
+    y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
+    y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+    return y, att
 
 
 class CausalSelfAttention(nnx.Module):
@@ -36,6 +51,7 @@ class CausalSelfAttention(nnx.Module):
             )
         )
         self.implementation = config.sdpa_implementation
+        self.use_vanilla_attn = config.use_vanilla_attn
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -54,9 +70,12 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        y = jax.nn.dot_product_attention(
-            q, k, v, is_causal=True, implementation=self.implementation
-        )
+        if self.use_vanilla_attn:
+            y, _ = calc_vanilla_attn(q, k, v, self.mask)
+        else:
+            y = jax.nn.dot_product_attention(
+                q, k, v, is_causal=True, implementation=self.implementation
+            )
 
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)

@@ -11,3 +11,4 @@ class Config(ABC):
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
+    use_vanilla_attn: bool = False # basic sdpa without optimizations
