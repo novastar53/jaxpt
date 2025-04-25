@@ -22,6 +22,7 @@ dataset_url = (
 )
 DATA_CACHE_DIR = Path() / "hellaswag"
 
+
 def calc_validation_loss(model: nnx.Module, loss_fn: Callable, dataloader: DataLoader, eval_steps=10):
   valid_loss = 0.0
   for i in range(eval_steps):
@@ -32,8 +33,6 @@ def calc_validation_loss(model: nnx.Module, loss_fn: Callable, dataloader: DataL
     valid_loss += loss
   valid_loss /= eval_steps
   return valid_loss
-
-
 
 
 def _download_hellaswag():
