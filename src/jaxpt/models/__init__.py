@@ -9,13 +9,19 @@ from .glu_gpt import (
     GLUGPTConfig,
     GLUGPT
 )
+from .nope_gpt import (
+    NoPE_GPTConfig,
+    NoPE_GPT,
+)
 
 __all__ = [
     "Bigram",
     "Charformer",
     "GPTConfig",
     "GLUGPTConfig",
+    "NoPE_GPTConfig",
     "GPT",
     "GLUGPT",
+    "NoPE_GPT",
     "from_huggingface_pretrained",
 ]
