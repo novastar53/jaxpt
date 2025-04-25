@@ -67,8 +67,8 @@ class GPT(nnx.Module):
     def __call__(self, idx):
         T = idx.shape[1]
         pos = jnp.arange(0, T, dtype=jnp.uint16)
-        pos_emb = self.wpe(pos)
-        tok_emb = self.wte(idx)
+        pos_emb = self.wpe(pos) # (T x C)
+        tok_emb = self.wte(idx) # (B x T x C)
         x = tok_emb + pos_emb
         for block in self.h:
             x = block(x)

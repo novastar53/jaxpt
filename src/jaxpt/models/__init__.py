@@ -13,6 +13,10 @@ from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
+from .rope_gpt import (
+    RoPE_GPTConfig,
+    RoPE_GPT,
+)
 
 __all__ = [
     "Bigram",
@@ -20,8 +24,10 @@ __all__ = [
     "GPTConfig",
     "GLUGPTConfig",
     "NoPE_GPTConfig",
+    "RoPE_GPTConfig",
     "GPT",
     "GLUGPT",
     "NoPE_GPT",
+    "RoPE_GPT",
     "from_huggingface_pretrained",
 ]
