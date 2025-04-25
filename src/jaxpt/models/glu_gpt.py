@@ -82,8 +82,8 @@ class GLUGPT(nnx.Module):
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
 
-
-    def from_checkpoint(self, fpath: str, rngs: nnx.Rngs, config=Optional[GLUGPTConfig]):
+    @staticmethod
+    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GLUGPTConfig]):
         config = config if config else GLUGPTConfig()
         model = GLUGPT(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)

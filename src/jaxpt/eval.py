@@ -2,8 +2,8 @@ import time
 import os
 import sys
 import requests
-from typing import overload
-
+from typing import Callable 
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -11,16 +11,29 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 import tiktoken
-from datasets import load_dataset
 import optax
 
-from jaxpt.models import GPT, from_checkpoint, from_huggingface_pretrained, GPTConfig
+from jaxpt.models import GPT, from_huggingface_pretrained, GPTConfig
+from jaxpt.dataloaders import DataLoader
 from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
 dataset_url = (
     "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 )
 DATA_CACHE_DIR = Path() / "hellaswag"
+
+def calc_validation_loss(model: nnx.Module, loss_fn: Callable, dataloader: DataLoader, eval_steps=10):
+  valid_loss = 0.0
+  for i in range(eval_steps):
+    batch, targets = dataloader()
+    batch = np.squeeze(batch)
+    targets = np.squeeze(targets)
+    loss = loss_fn(model, batch, targets)
+    valid_loss += loss
+  valid_loss /= eval_steps
+  return valid_loss
+
+
 
 
 def _download_hellaswag():
@@ -110,7 +123,7 @@ if __name__ == "__main__":
     rngs = nnx.Rngs(key)
     checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
     config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla")
-    model = from_checkpoint(checkpoint, rngs=rngs, config=config)
+    model = GPT.from_checkpoint(checkpoint, rngs=rngs, config=config)
     # model = from_huggingface_pretrained(rngs=rngs)
     # model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.eval()

@@ -1,6 +1,9 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
+import tiktoken
 
 
 def top_k_sampling(logits, key, k=50):
@@ -26,3 +29,21 @@ def generate(
         x_next = x_next.reshape(x_next.shape[0], 1)
         x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
     return x
+
+
+def generate_completions(model, prefix="Hello, I'm a language model,", num_completions=5, max_length=20):
+  generate_completion = partial(generate, model, max_length=max_length)
+  enc = tiktoken.get_encoding('gpt2')
+  tokens = enc.encode(prefix)
+  tokens = jnp.array(tokens, dtype=jnp.int32)
+  tokens = jnp.expand_dims(tokens, axis=0)
+  x = jnp.tile(tokens, (num_completions, 1))
+
+  x = generate_completion(x=x) # Make sure you can do a forward pass
+  output = []
+  for i in range(num_completions):
+      tokens = x[i, :max_length].tolist()
+      decoded = enc.decode(tokens)
+      output.append(decoded)
+  return output
+

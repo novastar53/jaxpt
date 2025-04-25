@@ -82,8 +82,8 @@ class GPT(nnx.Module):
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
 
-
-    def from_checkpoint(self, fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
+    @staticmethod
+    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
         config = config if config else GPTConfig()
         model = GPT(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)

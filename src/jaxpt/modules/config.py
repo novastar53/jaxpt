@@ -5,6 +5,7 @@ import jax.numpy as jnp
 
 @dataclass
 class Config(ABC):
+    name: str = "model"
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64

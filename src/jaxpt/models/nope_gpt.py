@@ -68,7 +68,8 @@ class NoPE_GPT(nnx.Module):
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
 
-    def from_checkpoint(self, fpath: str, rngs: nnx.Rngs, config=Optional[NoPE_GPTConfig]):
+    @staticmethod
+    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[NoPE_GPTConfig]):
         config = config if config else NoPE_GPTConfig()
         model = NoPE_GPT(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)

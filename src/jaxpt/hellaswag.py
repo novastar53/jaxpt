@@ -40,7 +40,7 @@ from transformers import GPT2LMHeadModel
 
 import jax
 import flax.nnx as nnx
-from jaxpt.models import GPT, GPTConfig, from_checkpoint, from_huggingface_pretrained
+from jaxpt.models import GPT, GPTConfig, from_huggingface_pretrained
 import jax.numpy as jnp
 import numpy as np
 
@@ -148,7 +148,7 @@ def evaluate(model_type, device):
         / "checkpoint-19000.pt"
     )
     config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla")
-    model = from_checkpoint(checkpoint, rngs=rngs, config=config)
+    model = GPT.from_checkpoint(checkpoint, rngs=rngs, config=config)
     # model = from_huggingface_pretrained(rngs=rngs)
     model.eval()
 
