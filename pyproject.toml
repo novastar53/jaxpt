@@ -12,6 +12,7 @@ dependencies = [
     "datasets>=3.3.2",
     "flash-attention-jax>=0.3.1",
     "flax>=0.10.2",
+    "google-cloud-storage>=3.1.0",
     "huggingface>=0.0.1",
     "ipykernel>=6.29.5",
     "jupyter>=1.1.1",
