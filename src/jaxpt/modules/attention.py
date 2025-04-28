@@ -82,7 +82,7 @@ class CausalSelfAttention(nnx.Module):
         return y
 
 class RoPEAttention(nnx.Module):
-    def __init__(self, config: Config, wpe: nnx.Param, rngs: nnx.Rngs):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_attn = nnx.Linear(
             config.n_embed,
             3 * config.n_embed,
@@ -98,35 +98,42 @@ class RoPEAttention(nnx.Module):
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
             ),
             bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
             rngs=rngs,
+            dtype=config.dtype,
         )
-        self.wpe = wpe
-
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
-            )
-        )
         self.implementation = config.sdpa_implementation
         self.use_vanilla_attn = config.use_vanilla_attn
+        self.omega = None
+        self.config = config
+        query_size = config.n_embed // config.n_head
+        base_freq = (1e-5)**(2/query_size)
+        omega = jnp.empty(shape=(config.block_size, query_size), dtype=self.config.dtype)
+        for p in range(config.block_size):
+            for k in range(query_size):
+                val = p * (base_freq ** k)
+                omega = omega.at[p, k].set(val)
+        self.omega = nnx.Variable(omega)
+
+   
+    def apply_rope_attn(self, v):
+        omega = self.omega[:v.shape[-2], :]
+        a = v * jnp.cos(omega) 
+        b = v * jnp.sin(omega) 
+        b = b.reshape(-1, 2)[..., ::-1]
+        b = b.at[..., -1].set(b[..., -1]*-1).reshape(v.shape)
+        return a + b
 
     def __call__(self, x):
         B, T, C = x.shape
         qkv = self.c_attn(x)  # B, T, 3 * C
         q, k, v = jnp.split(qkv, 3, axis=-1)  # 3 * (B, T, C)
 
-        pos = jnp.arange(0, T, dtype=jnp.uint16)
-        pos_emb = self.wpe(pos)
-
         q = jnp.reshape(
             q, (B, self.n_head, T, C // self.n_head)
         )  
-        q += pos_emb
+        q = self.apply_rope_attn(q)
         q = jnp.reshape(
             q, (B, T, self.n_head, C // self.n_head)
         )
@@ -134,7 +141,7 @@ class RoPEAttention(nnx.Module):
         k = jnp.reshape(
             k, (B, self.n_head, T, C // self.n_head)
         )  
-        k += pos_emb
+        k = self.apply_rope_attn(k)
         k = jnp.reshape(
             k, (B, T, self.n_head, C // self.n_head)
         )
