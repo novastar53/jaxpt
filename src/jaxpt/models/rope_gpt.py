@@ -24,11 +24,11 @@ class RoPE_GPTConfig(Config):
 
 
 class Block(nnx.Module):
-    def __init__(self, config: RoPE_GPTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: RoPE_GPTConfig, omega: nnx.Variable, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
-        self.attn = RoPEAttention(config, rngs=rngs)
+        self.attn = RoPEAttention(config, omega, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
@@ -51,7 +51,16 @@ class RoPE_GPT(nnx.Module):
             param_dtype=config.dtype,
             rngs=rngs,
         )
-        self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
+
+        query_size = config.n_embed // config.n_head
+        base_freq = (1e-5)**(2/query_size)
+        omega = jnp.empty(shape=(config.block_size, query_size), dtype=config.dtype)
+        for p in range(config.block_size):
+            for k in range(query_size):
+                val = p * (base_freq ** k)
+                omega = omega.at[p, k].set(val)
+        omega = nnx.Variable(omega)
+        self.h = [Block(config, omega, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )

@@ -82,7 +82,7 @@ class CausalSelfAttention(nnx.Module):
         return y
 
 class RoPEAttention(nnx.Module):
-    def __init__(self, config: Config, rngs: nnx.Rngs):
+    def __init__(self, config: Config, omega: nnx.Variable, rngs: nnx.Rngs):
         self.c_attn = nnx.Linear(
             config.n_embed,
             3 * config.n_embed,
@@ -107,14 +107,7 @@ class RoPEAttention(nnx.Module):
         self.use_vanilla_attn = config.use_vanilla_attn
         self.omega = None
         self.config = config
-        query_size = config.n_embed // config.n_head
-        base_freq = (1e-5)**(2/query_size)
-        omega = jnp.empty(shape=(config.block_size, query_size), dtype=self.config.dtype)
-        for p in range(config.block_size):
-            for k in range(query_size):
-                val = p * (base_freq ** k)
-                omega = omega.at[p, k].set(val)
-        self.omega = nnx.Variable(omega)
+        self.omega = omega
 
    
     def apply_rope_attn(self, v):
