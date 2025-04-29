@@ -25,10 +25,10 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = [
-    "jax[cuda12_pip]>=0.5.0",
+    "jax[cuda12_pip]>=0.5.0,<0.6.0",
 ]
 metal = [
-    "jax>=0.5.0",
+    "jax>=0.5.0,<0.6.0",
 ]
 dev = [
     "pytest>=8.0.0",
