@@ -43,15 +43,7 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
-            )
-        )
         self.implementation = config.sdpa_implementation
-        self.use_vanilla_attn = config.use_vanilla_attn
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -70,12 +62,9 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        if self.use_vanilla_attn:
-            y, _ = calc_vanilla_attn(q, k, v, self.mask)
-        else:
-            y = jax.nn.dot_product_attention(
-                q, k, v, is_causal=True, implementation=self.implementation
-            )
+        y = jax.nn.dot_product_attention(
+            q, k, v, is_causal=True, implementation=self.implementation
+        )
 
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)

@@ -77,20 +77,20 @@ class GPT(nnx.Module):
         return logits
 
 
-    def save_checkpoint(self, fpath: str):
-        _, _, other_state = nnx.split(self, nnx.RngState, ...)
-        ckptr = ocp.StandardCheckpointer()
-        ckptr.save(fpath, other_state)
+def save_checkpoint(m, fpath: str):
+    _, _, other_state = nnx.split(m, nnx.RngState, ...)
+    ckptr = ocp.StandardCheckpointer()
+    ckptr.save(fpath, other_state)
 
-    @staticmethod
-    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
-        config = config if config else GPTConfig()
-        model = GPT(config=config, rngs=rngs)
-        _, _, other_state = nnx.split(model, nnx.RngState, ...)
-        checkpointer = ocp.StandardCheckpointer()
-        other_state = checkpointer.restore(fpath, target=other_state)
-        nnx.update(model, other_state)
-        return model
+
+def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GPTConfig]):
+    config = config if config else GPTConfig()
+    model = GPT(config=config, rngs=rngs)
+    _, _, other_state = nnx.split(model, nnx.RngState, ...)
+    checkpointer = ocp.StandardCheckpointer()
+    other_state = checkpointer.restore(fpath, target=other_state)
+    nnx.update(model, other_state)
+    return model
 
 
 def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
