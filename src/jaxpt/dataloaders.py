@@ -1,5 +1,6 @@
 from typing import Callable
 import os
+from abc import ABC, abstractmethod
 
 import jax
 import numpy as np
@@ -8,41 +9,38 @@ import jax.numpy as jnp
 import tiktoken
 
 
-def load_text(path):
-    with open(path, "r") as f:
-        text = f.read()
-    return text
+from abc import ABC, abstractmethod
 
-
-class DataLoader:
+class BaseDataLoader(ABC):
+    """
+    Abstract base class for data loaders that yield token batches.
+    Subclasses must implement _list_shards and _load_shard.
+    """
     def __init__(
         self,
-        dirpath: str,
         batch_size: int,
         block_size: int,
         device_rank: int,
         label: str | None = None,
         quiet: bool = False,
     ):
-        self.dirpath = dirpath
+        # Common initialization
         self.enc = tiktoken.get_encoding("gpt2")
         self.eot = self.enc._special_tokens["<|endoftext|>"]
-
         self.B = batch_size
         self.T = block_size
         self.D = device_rank
+        self.label = label
 
-        self.shards = os.listdir(dirpath)
-        if label is not None:
-            self.shards = [shard for shard in self.shards if label in shard]
-
+        # List and filter shards
+        self.shards = self._list_shards(label)
         self.cur_shard = 0
         self.shard_pos = 0
-        self.shard = self.__load_shard()
+        self.shard = self._load_shard()
         self.shard_size = len(self.shard)
 
         if not quiet:
-            print(f"""dataloader initialized:
+            print(f"""{self.__class__.__name__} initialized:
 ------------------------
 label:          {label}
 shards:         {len(self.shards):,}
@@ -55,55 +53,117 @@ device rank:    {self.D}
     def __len__(self):
         return len(self.shards) * self.shard_size
 
-    def __load_shard(self):
-        if self.cur_shard >= len(self.shards):
-            self.cur_shard = 0
-        shard = self.shards[self.cur_shard]
-        tokens = np.load(os.path.join(self.dirpath, shard))
-        if type(tokens) is not np.ndarray:
-            tokens = tokens["arr_0"]
-        self.shard_size = len(tokens)
-        return tokens
-
     def __call__(self):
-        # preallocate the  buffer
+        # preallocate buffer
         buf_size = self.B * self.T * self.D + 1
         buf = np.zeros((buf_size,), dtype=np.uint16)
 
-        # if the shard has enough tokens remaining
         if self.shard_pos + buf_size < self.shard_size:
             buf[:] = self.shard[self.shard_pos : self.shard_pos + buf_size]
             self.shard_pos += buf_size
         else:
-            # load the remaining shard into the buffer
-            buf_prefix_size = self.shard_size - self.shard_pos
-            buf[:buf_prefix_size] = self.shard[
-                self.shard_pos : self.shard_pos + buf_prefix_size
-            ]
-            buf_pos = buf_prefix_size
+            buf_prefix = self.shard_size - self.shard_pos
+            buf[:buf_prefix] = self.shard[self.shard_pos :]
+            buf_pos = buf_prefix
 
-            # if the remainder of the buffer is larger than the shard, load as many shards as needed
-            if buf_size - buf_prefix_size > self.shard_size:
-                n_shards = (buf_size - buf_prefix_size) // self.shard_size
-                for _ in range(n_shards):
-                    self.cur_shard += 1
-                    self.shard = self.__load_shard()
-                    buf[buf_pos : buf_pos + self.shard_size] = self.shard
-                    buf_pos += self.shard_size
+            # fill full shards
+            while buf_pos + self.shard_size <= buf_size:
+                self.cur_shard += 1
+                self.shard = self._load_shard()
+                buf[buf_pos : buf_pos + self.shard_size] = self.shard
+                buf_pos += self.shard_size
 
-            # Load the next shard
+            # final partial shard
             self.cur_shard += 1
-            self.shard = self.__load_shard()
-            self.shard_pos = 0
-
-            # load the remainder of the buffer
-            buf[buf_pos:] = self.shard[: buf_size - buf_pos]
+            self.shard = self._load_shard()
             self.shard_pos = buf_size - buf_pos
+            buf[buf_pos:] = self.shard[: self.shard_pos]
 
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))
-
         return jnp.array(X), jnp.array(Y)
+
+    @abstractmethod
+    def _list_shards(self, label: str | None) -> list[str]:
+        """Return list of shard identifiers, filtered by label."""
+        pass
+
+    @abstractmethod
+    def _load_shard(self) -> np.ndarray:
+        """Load and return current shard as a 1D numpy array."""
+        pass
+
+
+class DataLoader(BaseDataLoader):
+    def __init__(
+        self,
+        dirpath: str,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        label: str | None = None,
+        quiet: bool = False,
+    ):
+        self.dirpath = dirpath
+        super().__init__(batch_size, block_size, device_rank, label, quiet)
+
+    def _list_shards(self, label):
+        shards = os.listdir(self.dirpath)
+        if label is not None:
+            shards = [s for s in shards if label in s]
+        return shards
+
+    def _load_shard(self):
+        if self.cur_shard >= len(self.shards):
+            self.cur_shard = 0
+        shard = self.shards[self.cur_shard]
+        tokens = np.load(os.path.join(self.dirpath, shard))
+        if not isinstance(tokens, np.ndarray):
+            tokens = tokens["arr_0"]
+        self.shard_size = len(tokens)
+        return tokens
+
+
+class CloudDataLoader(BaseDataLoader):
+    """
+    DataLoader that reads token shards from a Google Cloud Storage bucket.
+    """
+    def __init__(
+        self,
+        bucket_name: str,
+        bucket_prefix: str,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        label: str | None = None,
+        quiet: bool = False,
+    ):
+        from google.cloud import storage
+        from io import BytesIO
+
+        self.bucket_name = bucket_name
+        self.bucket_prefix = bucket_prefix
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(bucket_name)
+        super().__init__(batch_size, block_size, device_rank, label, quiet)
+
+    def _list_shards(self, label):
+        blobs = self.bucket.list_blobs(prefix=self.bucket_prefix)
+        return [blob.name for blob in blobs if (label is None or label in blob.name)]
+
+    def _load_shard(self):
+        from io import BytesIO
+
+        if self.cur_shard >= len(self.shards):
+            self.cur_shard = 0
+        shard_name = self.shards[self.cur_shard]
+        blob = self.bucket.blob(shard_name)
+        data = blob.download_as_bytes()
+        tokens = np.load(BytesIO(data))
+        if not isinstance(tokens, np.ndarray):
+            tokens = tokens["arr_0"]
+        self.shard_size = len(tokens)
+        return tokens
 
 
 class CharLoader:
