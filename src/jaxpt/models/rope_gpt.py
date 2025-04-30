@@ -19,7 +19,7 @@ class RoPE_GPTConfig(Config):
     n_embed: int = 768  # number token embedding dimensionsa
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-    rope_base_freq: 1e-5
+    rope_base_freq: float = 1e-5
 
 
 

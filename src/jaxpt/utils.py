@@ -1,4 +1,6 @@
 import csv
+
+import jax
 import jax.numpy as jnp
 from flax import nnx
 
@@ -18,7 +20,6 @@ def append_to_csv(file_path, row):
 
 
 # Model State PyTree Manipulation
-
 
 def get_param(state: nnx.statelib.State, path: str) -> nnx.variablelib.VariableState:
     keys = path.split(".")
@@ -42,26 +43,14 @@ def update_param(
     return state
 
 
-def count_params(state: nnx.statelib.State) -> int:
-    return len(list_params(state))
+def count_params(m: nnx.Module) -> int:
 
+    def get_size(y):
+        return y.size
 
-def list_params(state: nnx.statelib.State) -> list[str]:
-    stack = [(k, k, state[k]) for k in state.keys()]
+    _, params, _ = nnx.split(m, nnx.Param, nnx.Variable)
+    param_counts = jax.tree_util.tree_map(get_size, params)
+    total_params = jax.tree_util.tree_reduce(lambda x, y: x + y, param_counts, 0)
 
-    params = []
+    return total_params
 
-    while len(stack) > 0:
-        item_key, item_path, item_val = stack.pop()
-        if type(item_val) is nnx.statelib.State:
-            for k in item_val.keys():
-                stack.append((k, f"{item_path}.{k}", item_val[k]))
-        elif type(item_val) is nnx.variablelib.VariableState:
-            if (
-                (item_val.type != nnx.Variable)
-                and (item_val.value is not None)
-                and ("dropout" not in item_path)
-            ):
-                params.append(item_path)
-
-    return params
