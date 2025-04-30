@@ -43,7 +43,15 @@ class CausalSelfAttention(nnx.Module):
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
+        self.mask = nnx.Variable(
+            jnp.tril(
+                jnp.ones(
+                    (config.block_size, config.block_size), dtype=config.dtype
+                ).reshape((1, 1, config.block_size, config.block_size))
+            )
+        )
         self.implementation = config.sdpa_implementation
+        self.use_vanilla_attn = config.use_vanilla_attn
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -62,9 +70,12 @@ class CausalSelfAttention(nnx.Module):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        y = jax.nn.dot_product_attention(
-            q, k, v, is_causal=True, implementation=self.implementation
-        )
+        if self.use_vanilla_attn:
+            y, _ = calc_vanilla_attn(q, k, v, self.mask)
+        else:
+            y = jax.nn.dot_product_attention(
+                q, k, v, is_causal=True, implementation=self.implementation
+            )
 
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)
@@ -99,7 +110,7 @@ class RoPEAttention(nnx.Module):
         self.omega = omega
 
    
-    def apply_rope_attn(self, v):
+    def apply_rope(self, v):
         omega = self.omega[:v.shape[-2], :]
         a = v * jnp.cos(omega) 
         b = v * jnp.sin(omega) 
@@ -115,7 +126,7 @@ class RoPEAttention(nnx.Module):
         q = jnp.reshape(
             q, (B, self.n_head, T, C // self.n_head)
         )  
-        q = self.apply_rope_attn(q)
+        q = self.apply_rope(q)
         q = jnp.reshape(
             q, (B, T, self.n_head, C // self.n_head)
         )
@@ -123,7 +134,7 @@ class RoPEAttention(nnx.Module):
         k = jnp.reshape(
             k, (B, self.n_head, T, C // self.n_head)
         )  
-        k = self.apply_rope_attn(k)
+        k = self.apply_rope(k)
         k = jnp.reshape(
             k, (B, T, self.n_head, C // self.n_head)
         )

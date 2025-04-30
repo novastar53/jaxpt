@@ -19,7 +19,7 @@ class RoPE_GPTConfig(Config):
     n_embed: int = 768  # number token embedding dimensionsa
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-    apply_rope: bool = True
+    rope_base_freq: 1e-5
 
 
 
@@ -52,15 +52,18 @@ class RoPE_GPT(nnx.Module):
             rngs=rngs,
         )
 
+        # pre-calculate the RoPE thetas
         query_size = config.n_embed // config.n_head
-        base_freq = (1e-5)**(2/query_size)
-        omega = jnp.empty(shape=(config.block_size, query_size), dtype=config.dtype)
-        for p in range(config.block_size):
-            for k in range(query_size):
-                val = p * (base_freq ** k)
-                omega = omega.at[p, k].set(val)
+        base_freq = config.rope_base_freq**(2/query_size)
+        omega = jnp.ones((1, query_size)) * base_freq
+        pow = jnp.arange(0, query_size)
+        omega = jnp.repeat(omega**pow, config.block_size, axis=0)
+        pos = jnp.arange(0, config.block_size)
+        pos = jnp.expand_dims(pos, axis=1)
+        omega = omega * pos
         omega = nnx.Variable(omega)
         self.h = [Block(config, omega, rngs=rngs) for _ in range(config.n_layer)]
+
         self.ln_f = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
