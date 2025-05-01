@@ -18,6 +18,11 @@ from .rope_gpt import (
     RoPE_GPT,
 )
 
+from .mobile_llm import (
+    Mobile_LLM,
+    MobileLLM_Config
+)
+
 __all__ = [
     "Bigram",
     "Charformer",
@@ -25,9 +30,11 @@ __all__ = [
     "GLUGPTConfig",
     "NoPE_GPTConfig",
     "RoPE_GPTConfig",
+    "MobileLLM_Config",
     "GPT",
     "GLUGPT",
     "NoPE_GPT",
     "RoPE_GPT",
+    "Mobile_LLM",
     "from_huggingface_pretrained",
 ]
