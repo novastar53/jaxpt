@@ -70,13 +70,14 @@ class SelfAttentionBase(nnx.Module, abc.ABC):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.mask = nnx.Variable(
-            jnp.tril(
-                jnp.ones(
-                    (config.block_size, config.block_size), dtype=config.dtype
-                ).reshape((1, 1, config.block_size, config.block_size))
+        if config.sdpa_implementation == "slow":
+            self.mask = nnx.Variable(
+                jnp.tril(
+                    jnp.ones(
+                        (config.block_size, config.block_size), dtype=config.dtype
+                    ).reshape((1, 1, config.block_size, config.block_size))
+                )
             )
-        )
         self.n_head = config.n_head
         self.n_embed = config.n_embed
         self.implementation = config.sdpa_implementation
@@ -118,7 +119,8 @@ class CausalSelfAttention(SelfAttentionBase):
 
 class RoPEAttention(SelfAttentionBase, RoPE):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        super().__init__(config=config, omega=rope_omega, rngs=rngs)
+        SelfAttentionBase.__init__(self, config=config, rngs=rngs)
+        RoPE.__init__(self, omega=rope_omega)
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -156,19 +158,20 @@ class RoPEAttention(SelfAttentionBase, RoPE):
 
 class MQ_Attention(SelfAttentionBase, RoPE):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        super().__init__(config=config, omega=rope_omega, rngs=rngs)
+        #SelfAttentionBase.__init__(self, config=config, rngs=rngs)
+        RoPE.__init__(self, omega=rope_omega)
 
         self.wq = nnx.Linear(
             config.n_embed,
             config.n_embed  // config.n_head,
             kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
             dtype=config.dtype,
-            rngs=config.rngs
+            rngs=rngs
         )
         self.wkv = nnx.Linear(
             config.n_embed,
             2 * config.n_embed,
-            kernel=nnx.initializers.normal(stddev=config.init_stddev),
+            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
             bias_init=nnx.initializers.zeros,
             dtype=config.dtype,
             rngs=rngs,

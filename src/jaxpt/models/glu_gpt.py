@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import flax.nnx as nnx
 
 from jaxpt.modules.attention import CausalSelfAttention
-from jaxpt.modules.mlp import GLUMLP 
+from jaxpt.modules.mlp import GLU 
 from jaxpt.modules.config import Config
 
 import orbax.checkpoint as ocp
@@ -34,7 +34,7 @@ class Block(nnx.Module):
         self.ln_2 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
         )
-        self.mlp = GLUMLP(config, rngs=rngs)
+        self.mlp = GLU(config, rngs=rngs)
 
     def __call__(self, x):
         x = self.attn(self.ln_1(x)) + x

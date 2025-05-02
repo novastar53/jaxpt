@@ -7,6 +7,7 @@ import flax.nnx as nnx
 from jaxpt.modules.attention import RoPEAttention
 from jaxpt.modules.mlp import MLP
 from jaxpt.modules.config import Config
+from jaxpt.modules.position import calc_rope_omega
 
 import orbax.checkpoint as ocp
 
@@ -56,15 +57,12 @@ class RoPE_GPT(nnx.Module):
         )
 
         # pre-calculate the RoPE thetas
-        query_size = config.n_embed // config.n_head
-        base_freq = config.rope_base_freq**(2/query_size)
-        omega = jnp.ones((1, query_size), dtype=config.dtype) * base_freq
-        pow = jnp.arange(0, query_size)
-        omega = jnp.repeat(omega**pow, config.block_size, axis=0)
-        pos = jnp.arange(0, config.block_size)
-        pos = jnp.expand_dims(pos, axis=1)
-        omega = omega * pos
-        omega = nnx.Variable(omega)
+        omega = calc_rope_omega(config.n_embed, 
+                                config.n_head, 
+                                config.block_size,
+                                config.rope_base_freq, 
+                                config.dtype)
+
         self.h = [Block(config, omega, rngs=rngs) for _ in range(config.n_layer)]
 
         self.ln_f = nnx.LayerNorm(

@@ -6,43 +6,46 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.attention import MQ_Attention
+from jaxpt.modules.attention import MQ_Attention, RoPEAttention
+from jaxpt.modules.mlp import GLU, MLP
+from jaxpt.modules.position import calc_rope_omega
 
 @dataclass
 class MobileLLM_Config(Config):
     dtype: jnp.dtype = jnp.float32
-    block_size: int = 1024  # sequence length
-    vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
+    block_size: int = 2048  # sequence length
+    vocab_size: int = 32000  # 50257 padded to the nearest multiple of 64
     n_layer: int = 30 # number of attention blocks
     n_head: int = 9 # number of attention heads
-    n_kv_heads: int = 3 # number of shared key-value heads
+    n_kv_head: int = 3 # number of shared key-value heads
     n_embed: int = 576  # number token embedding dimensionsa
     n_mlp_hidden: int = 1536 # number of hidden dimensions
-    ln_epsilon: float = 1e-5
-    sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-    hidden_act: Literal["relu", "gelu", "silu"] = "silu"
-    rope_theta: int = 1e-5
-    max_pos_embeddings: int = 2048
-    init_stddev: float = 0.02
+    glu_activation: Literal["gelu", "silu", "sigmoid"] = "silu" # glu activation or gating function
+    ln_epsilon: float = 1e-5 # constant to prevent division by zero
+    sdpa_implementation: Literal["xla", "cudnn"] = "xla" # self-attention kernel implementation
+    rope_theta: int = 1e-5 # base frequency for rope
+    init_stddev: float = 0.02 # stddev for layer init
 
 
 class Block(nnx.Module):
-    def __init__(self, config: MobileLLM_Config, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: MobileLLM_Config, rope_omega: nnx.Variable, 
+                 rngs: nnx.Rngs) -> None:
         self.ln_1 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs
         )
-        self.attn = MQ_Attention(
-            config, rngs=rngs
+        self.attn = RoPEAttention(
+            config, rope_omega=rope_omega, rngs=rngs
         )
         self.ln_2 = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon,
             dtype=config.dtype, rngs=rngs
         )
+        self.mlp = GLU(config, rngs)
     
-    def __call_(self, x):
+    def __call__(self, x):
         x = self.attn(self.ln_1(x)) + x
-        x = self.mlp(self.ln2(x)) + x
+        x = self.mlp(self.ln_2(x)) + x
         return x
 
 
@@ -55,7 +58,16 @@ class Mobile_LLM(nnx.Module):
             embedding_init=nnx.initializers.normal(stddev=config.init_stddev),
             rngs=rngs
         )
-        self.h = []
+
+        # pre-calculate the RoPE thetas
+        omega = calc_rope_omega(config.n_embed, 
+                                config.n_head, 
+                                config.block_size,
+                                config.rope_theta, 
+                                config.dtype)
+        self.h = [Block(config, rope_omega=omega, rngs=rngs) 
+                  for _ in range(config.n_layer)]
+
         self.ln_f = nnx.LayerNorm(
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs

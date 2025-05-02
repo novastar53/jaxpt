@@ -1,8 +1,10 @@
+from functools import partial
+
 import flax.nnx as nnx
 
 from jaxpt.modules.config import Config
 
-class GLUMLP(nnx.Module):
+class GLU(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
             config.n_embed,
@@ -30,9 +32,18 @@ class GLUMLP(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
+        match config.glu_activation:
+            case "sigmoid":
+                self.activation = nnx.sigmoid
+            case "gelu":
+                self.activation = partial(nnx.gelu, approximate=True)
+            case "swish" | "sigmoid":
+                self.activation = nnx.silu
+            case _:
+                self.activation = nnx.sigmoid
 
     def __call__(self, x):
-        g = nnx.sigmoid(self.gate(x))
+        g = self.activation(self.gate(x))
         x = self.c_fc(x)
         x = x * g
         x = self.c_proj(x)
