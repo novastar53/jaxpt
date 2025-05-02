@@ -229,9 +229,12 @@ class GQ_Attention(SelfAttentionBase, RoPE):
         #SelfAttentionBase.__init__(self, config=config, rngs=rngs)
         RoPE.__init__(self, omega=rope_omega)
 
+        self.n_q = config.n_head // config.n_kv_head
+        self.config = config
+
         self.wq = nnx.Linear(
             config.n_embed,
-            config.n_config.n_embed  // config.n_head,
+            self.n_q * config.n_embed  // config.n_head,
             kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
             dtype=config.dtype,
             rngs=rngs
@@ -264,11 +267,14 @@ class GQ_Attention(SelfAttentionBase, RoPE):
         k, v = jnp.split(kv, 2, axis=-1) # (B, T, 2 * C)
 
         q = jnp.reshape(
-            q, (B, 1, T, C // self.n_head)
+            q, (B, self.n_q, T, C // self.n_head)
         )  
         q = self.apply_rope(q)
+
+        ## repeat the query heads to cover all the keys and values
+        q = jnp.reshape(q, (1, self.n_q, B, T, C // self.n_head))
         q = jnp.broadcast_to(
-            q, (self.n_head, B, T, C // self.n_head)
+            q, (self.config.n_kv_head, self.n_q, B, T, C // self.n_head)
         )
         q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head))
 

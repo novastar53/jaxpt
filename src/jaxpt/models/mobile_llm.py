@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.attention import MQ_Attention, RoPEAttention
+from jaxpt.modules.attention import GQ_Attention, MQ_Attention, RoPEAttention
 from jaxpt.modules.mlp import GLU, MLP
 from jaxpt.modules.position import calc_rope_omega
 
@@ -34,7 +34,7 @@ class Block(nnx.Module):
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs
         )
-        self.attn = MQ_Attention(
+        self.attn = GQ_Attention(
             config, rope_omega=rope_omega, rngs=rngs
         )
         self.ln_2 = nnx.LayerNorm(
