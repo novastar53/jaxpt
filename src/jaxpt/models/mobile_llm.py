@@ -5,7 +5,8 @@ import flax.nnx as nnx
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
-from jaxpt.modules import Config, RoPEAttention
+from jaxpt.modules.config import Config
+from jaxpt.modules.attention import MQ_Attention
 
 @dataclass
 class MobileLLM_Config(Config):
@@ -16,10 +17,10 @@ class MobileLLM_Config(Config):
     n_head: int = 9 # number of attention heads
     n_kv_heads: int = 3 # number of shared key-value heads
     n_embed: int = 576  # number token embedding dimensionsa
-    n_hidden: int = 1536 # number of hidden dimensions
+    n_mlp_hidden: int = 1536 # number of hidden dimensions
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-    hidden_act: Literal["relu", "silu"] = "silu"
+    hidden_act: Literal["relu", "gelu", "silu"] = "silu"
     rope_theta: int = 1e-5
     max_pos_embeddings: int = 2048
     init_stddev: float = 0.02
@@ -31,7 +32,7 @@ class Block(nnx.Module):
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs
         )
-        self.attn = RoPEAttention(
+        self.attn = MQ_Attention(
             config, rngs=rngs
         )
         self.ln_2 = nnx.LayerNorm(

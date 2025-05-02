@@ -4,7 +4,9 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from jaxpt.modules import CausalSelfAttention, MLP, Config
+from jaxpt.modules.attention import CausalSelfAttention
+from jaxpt.modules.mlp import MLP
+from jaxpt.modules.config import Config
 
 import orbax.checkpoint as ocp
 
@@ -17,6 +19,7 @@ class NoPE_GPTConfig(Config):
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
+    n_mlp_hidden: int = 4 * 768 # hiden size for piecewise FFN
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
 

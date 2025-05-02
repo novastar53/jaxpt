@@ -3,12 +3,11 @@ import abc
 import math
 
 import jax
-from jax._src.cudnn.fused_attention_stablehlo import (
-    dot_product_attention as cudnn_dot_product_attention, MaskType)
 import flax.nnx as nnx
 import jax.numpy as jnp
 
-from jaxpt.modules import Config
+from jaxpt.modules.config import Config
+from jaxpt.modules.position import RoPE
 
 
 def _calc_slow_attn(q, k, v, mask, bias = None):
@@ -34,28 +33,20 @@ def _calc_attention(
     value,
     mask = None,
     bias = None,
-    implementation: Literal['xla', 'cudnn'] | None = None):
+    implementation: Literal['xla', 'cudnn', 'slow'] | None = None):
 
     output_shape = jnp.asarray(query).shape
     _, _, _, H = key.shape
     scale_val = (1.0 / jnp.sqrt(H)) 
 
     match implementation:
-        case 'xla':
-            out = jax.nn._dot_product_attention_xla(
-                query, key, value, None, None, is_causal=True,
-                scale=scale_val, q_seqlen=None,
-                kv_seqlen=None,
-                local_window_size=None,
-            )
-        case 'cudnn':
-            out = cudnn_dot_product_attention(
-                query, key, value, bias, None, None,
-                None, scale=scale_val, mask_type=MaskType.CAUSAL,
-                sliding_window_length=None,
+        case 'xla' | 'cudnn':
+            out = jax.nn.dot_product_attention(
+                query, key, value, mask=mask, bias=bias, 
+                is_causal=True, implementation=implementation
             )
         case _: 
-           out, _ = _calc_slow_attn(query, key, value, mask, bias)
+            out, _ = _calc_slow_attn(query, key, value, mask, bias)
 
     return jnp.reshape(out, output_shape)
 
@@ -89,11 +80,11 @@ class SelfAttentionBase(nnx.Module, abc.ABC):
         self.n_head = config.n_head
         self.n_embed = config.n_embed
         self.implementation = config.sdpa_implementation
-        self.use_slow_attention = config.use_slow_attention
 
     @abc.abstractmethod
     def __call__(self, x):
         raise NotImplementedError
+
 
 class CausalSelfAttention(SelfAttentionBase):
     def __init__(self, config: Config, rngs: nnx.Rngs):
@@ -124,19 +115,10 @@ class CausalSelfAttention(SelfAttentionBase):
         y = self.c_proj(y)
         return y
 
-class RoPEAttention(SelfAttentionBase):
-    def __init__(self, config: Config, omega: nnx.Variable, rngs: nnx.Rngs):
-        super().__init__(config, rngs)
-        self.omega = omega
 
-   
-    def apply_rope(self, v):
-        omega = self.omega[:v.shape[-2], :]
-        a = v * jnp.cos(omega) 
-        b = v * jnp.sin(omega) 
-        b = b.reshape(-1, 2)[..., ::-1]
-        b = b.at[..., -1].multiply(-1).reshape(v.shape)
-        return a + b
+class RoPEAttention(SelfAttentionBase, RoPE):
+    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+        super().__init__(config=config, omega=rope_omega, rngs=rngs)
 
     def __call__(self, x):
         B, T, C = x.shape
@@ -172,3 +154,65 @@ class RoPEAttention(SelfAttentionBase):
         return y
 
 
+class MQ_Attention(SelfAttentionBase, RoPE):
+    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+        super().__init__(config=config, omega=rope_omega, rngs=rngs)
+
+        self.wq = nnx.Linear(
+            config.n_embed,
+            config.n_embed  // config.n_head,
+            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
+            dtype=config.dtype,
+            rngs=config.rngs
+        )
+        self.wkv = nnx.Linear(
+            config.n_embed,
+            2 * config.n_embed,
+            kernel=nnx.initializers.normal(stddev=config.init_stddev),
+            bias_init=nnx.initializers.zeros,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+        self.wproj = nnx.Linear(
+            config.n_embed,
+            config.n_embed,
+            kernel_init=nnx.initializers.normal(
+                stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
+            ),
+            bias_init=nnx.initializers.zeros,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+        self.n_head = config.n_head
+    
+    def __call__(self, x):
+        B, T, C = x.shape
+        q = self.wq(x) # (B, T, C // n_head)
+        kv = self.wkv(x) # (B, T, 2 * C)
+        k, v = jnp.split(kv, 2, axis=-1) # (B, T, 2 * C)
+
+        q = jnp.reshape(
+            q, (B, self.n_head, T, C // self.n_head)
+        )  
+        q = self.apply_rope(q)
+        q = jnp.reshape(
+            q, (B, T, self.n_head, C // self.n_head)
+        )
+
+        k = jnp.reshape(
+            k, (B, self.n_head, T, C // self.n_head)
+        )  
+        k = self.apply_rope(k)
+        k = jnp.reshape(
+            k, (B, T, self.n_head, C // self.n_head)
+        )
+
+        v = jnp.reshape(v, B, T, self.n_head, C // self.n_head)
+
+        y = _calc_attention(
+            q, k, v, implementation=self.implementation
+        ) # (B, T, n_head, C // n_head)
+
+        y = jnp.reshape(y, (B, T, C))
+        y = self.wproj(y) 
+        return y
