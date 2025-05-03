@@ -19,7 +19,7 @@ def top_k_sampling(logits, key, k=50):
 
 # @nnx.jit(static_argnames=("max_length", "temperature", "top_k"))
 def generate(
-    model: nnx.Module, *, x: jax.Array, max_length=50, temperature=0.7, top_k=50
+    model: nnx.Module, *, x: jax.Array, max_length=50, temperature=0.2, top_k=50
 ) -> jax.Array:
     key = jax.random.PRNGKey(0)
 

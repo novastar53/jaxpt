@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, List
 import os
 from abc import ABC, abstractmethod
 
@@ -8,8 +8,6 @@ import jax.numpy as jnp
 
 import tiktoken
 
-
-from abc import ABC, abstractmethod
 
 class BaseDataLoader(ABC):
     """
@@ -62,22 +60,26 @@ device rank:    {self.D}
             buf[:] = self.shard[self.shard_pos : self.shard_pos + buf_size]
             self.shard_pos += buf_size
         else:
+            # fill the remaining shard
             buf_prefix = self.shard_size - self.shard_pos
             buf[:buf_prefix] = self.shard[self.shard_pos :]
             buf_pos = buf_prefix
 
-            # fill full shards
-            while buf_pos + self.shard_size <= buf_size:
-                self.cur_shard += 1
-                self.shard = self._load_shard()
-                buf[buf_pos : buf_pos + self.shard_size] = self.shard
-                buf_pos += self.shard_size
-
-            # final partial shard
+            # load the next shard
             self.cur_shard += 1
             self.shard = self._load_shard()
+            self.shard_pos = 0
+
+            # fill full shards
+            while buf_pos + self.shard_size <= buf_size:
+                buf[buf_pos : buf_pos + self.shard_size] = self.shard
+                buf_pos += self.shard_size
+                self.cur_shard += 1
+                self.shard = self._load_shard()
+
+            # final partial shard
             self.shard_pos = buf_size - buf_pos
-            buf[buf_pos:] = self.shard[: self.shard_pos]
+            buf[buf_pos:] = self.shard[:self.shard_pos]
 
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))
@@ -139,7 +141,6 @@ class CloudDataLoader(BaseDataLoader):
         quiet: bool = False,
     ):
         from google.cloud import storage
-        from io import BytesIO
 
         self.bucket_name = bucket_name
         self.bucket_prefix = bucket_prefix
@@ -165,6 +166,63 @@ class CloudDataLoader(BaseDataLoader):
         self.shard_size = len(tokens)
         return tokens
 
+
+class HuggingfaceDataLoader(BaseDataLoader):
+    def __init__(
+        self,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        tokenizer: str,
+        dataset_paths: List[str],
+        dataset_names: List[str],
+        probabilities: List[float],
+        label: str,
+        random_seed: int = 42,
+        buffer_size: int = 10_000,
+        streaming: bool = True,
+        quiet: bool = False,
+    ):
+        self.streaming = True
+
+        from datasets import load_dataset, interleave_datasets
+        from transformers import AutoTokenizer
+
+        print(f"Initializing tokenizer {tokenizer}")
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+
+        self.dataset_objs = []
+        for ds_path, ds_name in zip(dataset_paths, dataset_names):
+            self.dataset_objs.append(load_dataset(ds_path, ds_name, 
+                                             split=label, 
+                                             streaming=streaming))
+        ds = interleave_datasets(
+            self.dataset_objs,
+            probabilities=probabilities,
+            seed=random_seed
+        )
+        self.ds = ds.shuffle(buffer_size=buffer_size, seed=random_seed)
+        self.iter_ds = iter(self.ds)
+
+        super().__init__(batch_size, block_size, device_rank, label, quiet)
+
+    def _list_shards(self, label):
+        if self.streaming == True:
+            return []
+        return NotImplementedError
+
+    def _load_shard(self):
+        try:
+            example = next(self.iter_ds)
+        except StopIteration:
+            self.iter_ds = iter(self.ds)
+            example = next(self.iter_ds)
+          
+        tokens = self.tokenizer.encode(example["text"])
+        self.shard_size = len(tokens)
+        return np.array(tokens)
+
+        
 
 class CharLoader:
     def __init__(self, text: str):
