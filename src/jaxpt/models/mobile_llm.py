@@ -20,6 +20,7 @@ class MobileLLM_Config(Config):
     n_kv_head: int = 3 # number of shared key-value heads
     n_embed: int = 576  # number token embedding dimensionsa
     n_mlp_hidden: int = 1536 # number of hidden dimensions
+    mlp_bias: bool = False # use bias in mlp layers
     glu_activation: Literal["gelu", "silu", "sigmoid"] = "silu" # glu activation or gating function
     ln_epsilon: float = 1e-5 # constant to prevent division by zero
     sdpa_implementation: Literal["xla", "cudnn"] = "xla" # self-attention kernel implementation
@@ -94,3 +95,9 @@ class Mobile_LLM(nnx.Module):
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
         nnx.update(model, other_state)
+
+
+def load_pretrained():
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")

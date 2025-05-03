@@ -11,6 +11,7 @@ class GLU(nnx.Module):
             config.n_mlp_hidden,
             kernel_init=nnx.initializers.normal(stddev=0.02),
             bias_init=nnx.initializers.zeros,
+            use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -19,6 +20,7 @@ class GLU(nnx.Module):
             config.n_mlp_hidden,
             kernel_init=nnx.initializers.normal(stddev=0.02),
             bias_init=nnx.initializers.zeros,
+            use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -29,6 +31,7 @@ class GLU(nnx.Module):
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
             ),
             bias_init=nnx.initializers.zeros,
+            use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
         )
