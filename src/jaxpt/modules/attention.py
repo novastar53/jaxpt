@@ -236,6 +236,8 @@ class GQ_Attention(SelfAttentionBase, RoPE):
             config.n_embed,
             config.n_embed,
             kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
+            bias_init=nnx.initializers.zeros,
+            use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs
         )
@@ -244,6 +246,7 @@ class GQ_Attention(SelfAttentionBase, RoPE):
             2 * config.n_kv_head * config.n_embed // config.n_head,
             kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
             bias_init=nnx.initializers.zeros,
+            use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -254,6 +257,7 @@ class GQ_Attention(SelfAttentionBase, RoPE):
                 stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
             ),
             bias_init=nnx.initializers.zeros,
+            use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
         )

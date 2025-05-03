@@ -21,6 +21,7 @@ class MobileLLM_Config(Config):
     n_embed: int = 576  # number token embedding dimensionsa
     n_mlp_hidden: int = 1536 # number of hidden dimensions
     mlp_bias: bool = False # use bias in mlp layers
+    attention_bias: bool = False # use bias in attention layers
     glu_activation: Literal["gelu", "silu", "sigmoid"] = "silu" # glu activation or gating function
     ln_epsilon: float = 1e-5 # constant to prevent division by zero
     sdpa_implementation: Literal["xla", "cudnn"] = "xla" # self-attention kernel implementation
@@ -31,14 +32,14 @@ class MobileLLM_Config(Config):
 class Block(nnx.Module):
     def __init__(self, config: MobileLLM_Config, rope_omega: nnx.Variable, 
                  rngs: nnx.Rngs) -> None:
-        self.ln_1 = nnx.LayerNorm(
+        self.rms_n_1 = nnx.RMSNorm(
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs
         )
         self.attn = GQ_Attention(
             config, rope_omega=rope_omega, rngs=rngs
         )
-        self.ln_2 = nnx.LayerNorm(
+        self.rms_n_2 = nnx.RMSNorm(
             config.n_embed, epsilon=config.ln_epsilon,
             dtype=config.dtype, rngs=rngs
         )
@@ -69,7 +70,7 @@ class Mobile_LLM(nnx.Module):
         self.h = [Block(config, rope_omega=omega, rngs=rngs) 
                   for _ in range(config.n_layer)]
 
-        self.ln_f = nnx.LayerNorm(
+        self.rms_n_f = nnx.RMSNorm(
             config.n_embed, epsilon=config.ln_epsilon, 
             dtype=config.dtype, rngs=rngs
         )
