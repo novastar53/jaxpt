@@ -217,6 +217,13 @@ class HuggingfaceDataLoader(BaseDataLoader):
         except StopIteration:
             self.iter_ds = iter(self.ds)
             example = next(self.iter_ds)
+        
+        while example["text"] == None:
+            try:
+                example = next(self.iter_ds)
+            except StopIteration:
+                self.iter_ds = iter(self.ds)
+                example = next(self.iter_ds) 
           
         tokens = self.tokenizer.encode(example["text"])
         self.shard_size = len(tokens)
