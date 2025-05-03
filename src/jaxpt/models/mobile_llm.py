@@ -46,8 +46,8 @@ class Block(nnx.Module):
         self.mlp = GLU(config, rngs)
     
     def __call__(self, x):
-        x = self.attn(self.ln_1(x)) + x
-        x = self.mlp(self.ln_2(x)) + x
+        x = self.attn(self.rms_n_1(x)) + x
+        x = self.mlp(self.rms_n_2(x)) + x
         return x
 
 
@@ -79,7 +79,7 @@ class Mobile_LLM(nnx.Module):
         x = self.wte(idx)
         for block in self.h:
             x = block(x)
-        x = self.ln_f(x)
+        x = self.rms_n_f(x)
         logits = self.wte.attend(x)
         return logits
 
