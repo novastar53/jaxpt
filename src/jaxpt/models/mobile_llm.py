@@ -1,6 +1,7 @@
 from typing import Literal, Optional
 from dataclasses import dataclass
 
+import jax
 import flax.nnx as nnx
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
@@ -98,7 +99,78 @@ class Mobile_LLM(nnx.Module):
         nnx.update(model, other_state)
 
 
-def load_pretrained():
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
+
+def from_hf_pretrained(config: MobileLLM_Config, rngs: nnx.Rngs) -> Mobile_LLM:
+    m = Mobile_LLM(config, rngs)
+    graphdef, flax_params, other_state = nnx.split(m, nnx.Param, ...)
+
+    hf_m = load_hf_pretrained()
+    state = hf_m.state_dict()
+
+    flax_params.wte.embedding.value = jnp.array(state["model.embed_tokens.weight"].numpy())
+    flax_params.rms_n_f.scale.value = jnp.array(state["model.norm.weight"].numpy())
+
+    for i in range(len(flax_params.h)):
+        # MLP weights
+        flax_params.h[i].mlp.gate.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.gate_proj.weight"].numpy().T)
+        flax_params.h[i].mlp.c_fc.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.up_proj.weight"].numpy().T)
+        flax_params.h[i].mlp.c_proj.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.down_proj.weight"].numpy().T)
+
+        # RMS Norm weights
+        flax_params.h[i].rms_n_1.scale.value = jnp.array(state[f"model.layers.{i}.input_layernorm.weight"].numpy())
+        flax_params.h[i].rms_n_2.scale.value = jnp.array(state[f"model.layers.{i}.post_attention_layernorm.weight"].numpy()) 
+
+        # Causal self-attention weights
+        flax_params.h[i].attn.wproj.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.o_proj.weight"].numpy()) 
+        flax_params.h[i].attn.wq.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.q_proj.weight"].numpy())
+        wk = jnp.array(state[f"model.layers.{i}.self_attn.k_proj.weight"].numpy().T)
+        wv = jnp.array(state[f"model.layers.{i}.self_attn.v_proj.weight"].numpy().T)
+        wkv = jnp.concatenate([wk, wv], axis=1)
+        flax_params.h[i].attn.wkv.kernel.value = jnp.array(wkv)
+
+    m = nnx.merge(graphdef, flax_params, other_state)
+
+    return m 
+
+
+def load_hf_pretrained():
+    from transformers import AutoModelForCausalLM
     model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+
+    return model
+
+def convert_to_hf(m: Mobile_LLM):
+
+    import torch
+    import numpy as np
+
+    _, flax_params, _ = nnx.split(m, nnx.Param, ...)
+    hf_mobile_llm = load_hf_pretrained()
+
+    state = hf_mobile_llm.state_dict()
+
+    state["model.embed_tokens.weight"] = torch.from_numpy(np.array(flax_params.wte.embedding.value))
+    state["model.norm.weight"] = torch.from_numpy(np.array(flax_params.rms_n_f.scale.value))
+
+    for i in range(len(flax_params.h)):
+        # MLP weights
+        state[f"model.layers.{i}.mlp.gate_proj.weight"] = torch.from_numpy(np.array(flax_params.h[i].mlp.gate.kernel.value).T)
+        state[f"model.layers.{i}.mlp.up_proj.weight"] = torch.from_numpy(np.array(flax_params.h[i].mlp.c_fc.kernel.value).T)
+        state[f"model.layers.{i}.mlp.down_proj.weight"] = torch.from_numpy(np.array(flax_params.h[i].mlp.c_proj.kernel.value).T)
+
+        # RMS Norm weights
+        state[f"model.layers.{i}.input_layernorm.weight"] = torch.from_numpy(np.array(flax_params.h[i].rms_n_1.scale.value))
+        state[f"model.layers.{i}.post_attention_layernorm.weight"] = torch.from_numpy(np.array(flax_params.h[i].rms_n_2.scale.value))
+
+        # Causal self-attention weights
+        len_k = m.config.n_kv_head * m.config.n_embed // m.config.n_head
+        state[f"model.layers.{i}.self_attn.o_proj.weight"] = torch.from_numpy(np.array(flax_params.h[i].attn.wproj.kernel.value))
+        state[f"model.layers.{i}.self_attn.q_proj.weight"] = torch.from_numpy(np.array(flax_params.h[i].attn.wq.kernel.value))
+        wk = flax_params.h[i].attn.wkv.kernel.value[:,:len_k]
+        state[f"model.layers.{i}.self_attn.k_proj.weight"] = torch.from_numpy(np.array(wk.T))
+        wv = flax_params.h[i].attn.wkv.kernel.value[:,len_k:]
+        state[f"model.layers.{i}.self_attn.v_proj.weight"] = torch.from_numpy(np.array(wv.T))
+
+    hf_mobile_llm.load_state_dict(state, strict=True)
+
+    return hf_mobile_llm 
