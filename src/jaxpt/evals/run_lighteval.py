@@ -11,13 +11,25 @@ tracker = EvaluationTracker(
 
 params = PipelineParameters(
     launcher_type=ParallelismManager.ACCELERATE,  # use Accelerate
-    max_samples=100,        # limit total examples
+    #max_samples=100,        # limit total examples
 )
 
-tasks = "leaderboard|truthfulqa:mc|0|0"
+
+tasks = [
+  "lighteval|arc:easy|0|0",
+  "leaderboard|arc:challenge|0|0",
+  "lighteval|super_glue:boolq|0|0",
+  "helm|piqa|0|0",
+  "helm|siqa|0|0",
+  "leaderboard|hellaswag|0|0",
+  "helm|openbookqa|0|0",
+  "leaderboard|winogrande|0|0",
+  "lighteval|triviaqa|0|0",
+  "lighteval|race:high|0|0",
+]
 
 model_cfg = TransformersModelConfig(
-    model_name="gpt2",       # HF model ID
+    model_name="HuggingFaceTB/SmolLM-135M-Instruct",       # HF model ID
     revision="main",          # branch or tag
     add_special_tokens=True,  # if your prompts need extra tokens
     dtype="float32",          # torch dtype
@@ -26,7 +38,7 @@ model_cfg = TransformersModelConfig(
 
 # 5. Build and run the pipeline
 pipeline = Pipeline(
-    tasks=tasks,
+    tasks=",".join(tasks),
     pipeline_parameters=params,
     evaluation_tracker=tracker,
     model_config=model_cfg,
