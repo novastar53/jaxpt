@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.attention import GQ_Attention, MQ_Attention, RoPEAttention
+from jaxpt.modules.attention import GQ_Attention
 from jaxpt.modules.mlp import GLU, MLP
 from jaxpt.modules.position import calc_rope_omega
 
@@ -26,7 +26,7 @@ class MobileLLM_Config(Config):
     glu_activation: Literal["gelu", "silu", "sigmoid"] = "silu" # glu activation or gating function
     ln_epsilon: float = 1e-5 # constant to prevent division by zero
     sdpa_implementation: Literal["xla", "cudnn"] = "xla" # self-attention kernel implementation
-    rope_theta: int = 1e-5 # base frequency for rope
+    rope_theta: int = 1e-4 # base frequency for rope
     init_stddev: float = 0.02 # stddev for layer init
 
 
@@ -121,8 +121,8 @@ def from_hf_pretrained(config: MobileLLM_Config, rngs: nnx.Rngs) -> Mobile_LLM:
         flax_params.h[i].rms_n_2.scale.value = jnp.array(state[f"model.layers.{i}.post_attention_layernorm.weight"].numpy()) 
 
         # Causal self-attention weights
-        flax_params.h[i].attn.wproj.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.o_proj.weight"].numpy()) 
-        flax_params.h[i].attn.wq.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.q_proj.weight"].numpy())
+        flax_params.h[i].attn.wproj.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.o_proj.weight"].numpy().T) 
+        flax_params.h[i].attn.wq.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.q_proj.weight"].numpy().T)
         wk = jnp.array(state[f"model.layers.{i}.self_attn.k_proj.weight"].numpy().T)
         wv = jnp.array(state[f"model.layers.{i}.self_attn.v_proj.weight"].numpy().T)
         wkv = jnp.concatenate([wk, wv], axis=1)

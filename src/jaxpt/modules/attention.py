@@ -117,113 +117,6 @@ class CausalSelfAttention(SelfAttentionBase):
         return y
 
 
-class RoPEAttention(SelfAttentionBase, RoPE):
-    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        SelfAttentionBase.__init__(self, config=config, rngs=rngs)
-        RoPE.__init__(self, omega=rope_omega)
-
-    def __call__(self, x):
-        B, T, C = x.shape
-        qkv = self.c_attn(x)  # B, T, 3 * C
-        q, k, v = jnp.split(qkv, 3, axis=-1)  # 3 * (B, T, C)
-
-        q = jnp.reshape(
-            q, (B, self.n_head, T, C // self.n_head)
-        )  
-        q = self.apply_rope(q)
-        q = jnp.reshape(
-            q, (B, T, self.n_head, C // self.n_head)
-        )
-
-        k = jnp.reshape(
-            k, (B, self.n_head, T, C // self.n_head)
-        )  
-        k = self.apply_rope(k)
-        k = jnp.reshape(
-            k, (B, T, self.n_head, C // self.n_head)
-        )
-
-        v = jnp.reshape(
-            v, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
-
-        y = _calc_attention(
-            q, k, v, implementation=self.implementation
-        )
-
-        y = jnp.reshape(y, (B, T, C))  # (B, T, C)
-        y = self.c_proj(y)
-        return y
-
-
-class MQ_Attention(SelfAttentionBase, RoPE):
-    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        #SelfAttentionBase.__init__(self, config=config, rngs=rngs)
-        RoPE.__init__(self, omega=rope_omega)
-
-        self.wq = nnx.Linear(
-            config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
-            dtype=config.dtype,
-            rngs=rngs
-        )
-        self.wkv = nnx.Linear(
-            config.n_embed,
-            2 * config.n_embed // config.n_head,
-            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        self.wproj = nnx.Linear(
-            config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.initializers.normal(
-                stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        self.n_head = config.n_head
-        self.implementation = config.sdpa_implementation
-    
-    def __call__(self, x):
-        B, T, C = x.shape
-        q = self.wq(x) # (B, T, C)
-        kv = self.wkv(x) # (B, T, 2 * C // n_head)
-        k, v = jnp.split(kv, 2, axis=-1) # 2 x (B, T, C // n_head)
-
-        q = jnp.reshape(
-            q, (B, self.n_head, T, C // self.n_head)
-        )  
-        q = self.apply_rope(q)
-        q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head))
-
-
-        k = jnp.reshape(
-            k, (B, 1, T, C // self.n_head)
-        )  
-        k = self.apply_rope(k)
-        k = jnp.broadcast_to(
-            k.squeeze(), (self.n_head, B, T, C // self.n_head)
-        )
-        k = jnp.reshape(
-            k, (B, T, self.n_head, C // self.n_head)
-        )
-        
-        v = jnp.broadcast_to(v, (self.n_head, B, T, C // self.n_head))
-        v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head))
-
-        y = _calc_attention(
-            q, k, v, implementation=self.implementation
-        ) # (B, T, n_head, C // n_head)
-
-        y = jnp.reshape(y, (B, T, C))
-        y = self.wproj(y) 
-        return y
-
 
 class GQ_Attention(SelfAttentionBase, RoPE):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
@@ -271,36 +164,13 @@ class GQ_Attention(SelfAttentionBase, RoPE):
         kv = self.wkv(x) # (B, T, 2 * n_kv_head * C // n_head)
         k, v = jnp.split(kv, 2, axis=-1) # 2 x (B, T, n_kv_head * C // n_head)
 
-        # apply rope to the q heads
-        q = jnp.reshape(
-            q, (B, self.n_head, T, C // self.n_head)
-        )  
+        q = q.reshape((B, T, self.n_head, C // self.n_head)) 
         q = self.apply_rope(q)
-        q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head))
 
-        # apply rope to the k heads 
-        k = jnp.reshape(
-            k, (B, self.n_kv_head, T, C // self.n_head)
-        )  
+        k = k.reshape((B, T, self.n_kv_head, C // self.n_head))
         k = self.apply_rope(k)
-        # repeat the k heads
-        k = jnp.reshape(
-            k, (self.n_kv_head, B, T, C // self.n_head)
-        )
-        k = jnp.broadcast_to(
-            k, (self.n_head // self.n_kv_head, self.n_kv_head, B, T, C // self.n_head)
-        )
-        k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head))
-
-        # repeat the v heads
-        v = jnp.reshape(
-            v, (self.n_kv_head, B, T, C // self.n_head)
-        )
-        v = jnp.broadcast_to(
-            v, (self.n_head // self.n_kv_head, self.n_kv_head, B, T, C // self.n_head)
-        )
-        v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head))
-
+        
+        v = v.reshape((B, T, self.n_kv_head, C // self.n_head))
 
         y = _calc_attention(
             q, k, v, implementation=self.implementation

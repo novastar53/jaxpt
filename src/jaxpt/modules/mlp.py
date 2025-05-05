@@ -40,17 +40,18 @@ class GLU(nnx.Module):
                 self.activation = nnx.sigmoid
             case "gelu":
                 self.activation = partial(nnx.gelu, approximate=True)
-            case "swish" | "sigmoid":
+            case "swish" | "silu":
                 self.activation = nnx.silu
             case _:
                 self.activation = nnx.sigmoid
 
     def __call__(self, x):
-        g = self.activation(self.gate(x))
-        x = self.c_fc(x)
-        x = x * g
-        x = self.c_proj(x)
-        return x
+        h = self.c_fc(x)
+        g = self.gate(x)
+        g = self.activation(g)
+        h = g * h
+        y = self.c_proj(h)
+        return y
 
 
 

@@ -98,4 +98,3 @@ line-ending = "auto"
 
 [tool.uv.sources]
 jaxpt = { workspace = true }
-lighteval = { git = "https://github.com/huggingface/lighteval.git", rev = "main" }

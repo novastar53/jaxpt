@@ -13,10 +13,6 @@ from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
-from .rope_gpt import (
-    RoPE_GPTConfig,
-    RoPE_GPT,
-)
 
 from .mobile_llm import (
     Mobile_LLM,
