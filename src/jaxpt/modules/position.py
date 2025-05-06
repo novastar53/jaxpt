@@ -43,15 +43,15 @@ class RoPE_Classic(RoPE):
         super().__init__(omega)
 
     def apply_rope(self, v):
-            v = v.swapaxes(1, 2)
-            omega = self.omega[:v.shape[-2], :]
-            a = v * jnp.cos(omega) 
-            b = v * jnp.sin(omega) 
-            b = b.reshape(-1, 2)[..., ::-1]
-            b = b.at[..., -1].multiply(-1).reshape(v.shape)
-            y = a + b
-            y = y.swapaxes(1, 2)
-            return y
+        v = v.swapaxes(1, 2)
+        omega = self.omega[:v.shape[-2], :]
+        a = v * jnp.cos(omega) 
+        b = v * jnp.sin(omega) 
+        b = b.reshape(-1, 2)[..., ::-1]
+        b = b.at[..., -1].multiply(-1).reshape(v.shape)
+        y = a + b
+        y = y.swapaxes(1, 2)
+        return y
 
 
 class RoPE_Llama(RoPE):

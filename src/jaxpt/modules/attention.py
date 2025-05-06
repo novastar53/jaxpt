@@ -50,7 +50,14 @@ def _calc_attention(
 
     return jnp.reshape(out, output_shape)
 
+
 class SelfAttentionBase(nnx.Module, abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, x):
+        raise NotImplementedError
+
+
+class CausalSelfAttention(SelfAttentionBase):
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_attn = nnx.Linear(
             config.n_embed,
@@ -82,15 +89,6 @@ class SelfAttentionBase(nnx.Module, abc.ABC):
         self.n_embed = config.n_embed
         self.implementation = config.sdpa_implementation
 
-    @abc.abstractmethod
-    def __call__(self, x):
-        raise NotImplementedError
-
-
-class CausalSelfAttention(SelfAttentionBase):
-    def __init__(self, config: Config, rngs: nnx.Rngs):
-        super().__init__(config, rngs)
-
     def __call__(self, x):
         B, T, C = x.shape
         qkv = self.c_attn(x)  # B, T, 3 * C
@@ -120,7 +118,6 @@ class CausalSelfAttention(SelfAttentionBase):
 
 class GQ_Attention(SelfAttentionBase, RoPE_Llama):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        #SelfAttentionBase.__init__(self, config=config, rngs=rngs)
         RoPE_Llama.__init__(self, omega=rope_omega)
 
         self.config = config

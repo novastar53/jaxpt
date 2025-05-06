@@ -1,3 +1,11 @@
+import jax
+import jax.numpy as jnp
+import flax.nnx as nnx
+from jaxpt.models.mobile_llm import Mobile_LLM, MobileLLM_Config, convert_to_hf
+
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
 from lighteval.models.transformers.transformers_model import TransformersModelConfig
 from lighteval.logging.evaluation_tracker import EvaluationTracker
@@ -19,13 +27,36 @@ def parse_args():
     parser.add_argument("--tasks", type=str,
                         default="lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
                         help="Comma-separated list of tasks to run")
-    parser.add_argument("--model_name_or_path", type=str, required=True,
+    parser.add_argument("--model_name_or_path", type=str, 
                         help="Pretrained model identifier or path for TransformersModelConfig")
     return parser.parse_args()
 
 def main():
 
     args = parse_args()
+
+    key = jax.random.PRNGKey(1337)
+    rngs = nnx.Rngs(key)
+    config = MobileLLM_Config(dtype=jnp.float16, \
+                        vocab_size=49152,
+                        n_embed=576,
+                        n_head=9,
+                        n_kv_head=3,
+                        n_mlp_hidden=1536,
+                        sdpa_implementation="xla")
+    
+    #flax_model = Mobile_LLM.from_checkpoint(args.model_name_or_path, rngs=rngs, config=config)
+    #hf_model = convert_to_hf(flax_model)
+    hf_tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    hf_model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+
+
+    model_cfg = TransformersModelConfig(
+        model_name="HuggingFaceTB/SmolLM-135M",
+        dtype="float32",
+        add_special_tokens=True,
+        max_length=2048,        
+    )
 
     tracker = EvaluationTracker(
         output_dir=args.output_dir,
@@ -40,18 +71,16 @@ def main():
 
     tasks = args.tasks.split(",")
 
-    model_cfg = TransformersModelConfig(model_name_or_path=args.model_name_or_path)
-
-    # 5. Build and run the pipeline
     pipeline = Pipeline(
         tasks=",".join(tasks),
         pipeline_parameters=params,
         evaluation_tracker=tracker,
-        model_config=model_cfg,
+        model=hf_model,
+        model_config=model_cfg
     )
 
     pipeline.evaluate()            # run the eval
-    pipeline.save_and_push_results()  # write files (and push if enabled)
+    #pipeline.save_and_push_results()  # write files (and push if enabled)
     pipeline.show_results() 
 
 if __name__ == "__main__":
