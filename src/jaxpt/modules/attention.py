@@ -7,7 +7,7 @@ import flax.nnx as nnx
 import jax.numpy as jnp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.position import RoPE
+from jaxpt.modules.position import RoPE_Llama
 
 
 def _calc_slow_attn(q, k, v, mask, bias = None):
@@ -118,10 +118,10 @@ class CausalSelfAttention(SelfAttentionBase):
 
 
 
-class GQ_Attention(SelfAttentionBase, RoPE):
+class GQ_Attention(SelfAttentionBase, RoPE_Llama):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
         #SelfAttentionBase.__init__(self, config=config, rngs=rngs)
-        RoPE.__init__(self, omega=rope_omega)
+        RoPE_Llama.__init__(self, omega=rope_omega)
 
         self.config = config
 

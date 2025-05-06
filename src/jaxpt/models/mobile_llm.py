@@ -9,7 +9,7 @@ import orbax.checkpoint as ocp
 from jaxpt.modules.config import Config
 from jaxpt.modules.attention import GQ_Attention
 from jaxpt.modules.mlp import GLU, MLP
-from jaxpt.modules.position import calc_rope_omega
+from jaxpt.modules.position import calc_rope_omega_llama, RoPE_Llama
 
 @dataclass
 class MobileLLM_Config(Config):
@@ -26,6 +26,7 @@ class MobileLLM_Config(Config):
     glu_activation: Literal["gelu", "silu", "sigmoid"] = "silu" # glu activation or gating function
     ln_epsilon: float = 1e-5 # constant to prevent division by zero
     sdpa_implementation: Literal["xla", "cudnn"] = "xla" # self-attention kernel implementation
+    rope_impl: Literal["classic", "llama"] = "llama" # choose the roPE implementation 
     rope_theta: int = 1e-4 # base frequency for rope
     init_stddev: float = 0.02 # stddev for layer init
 
@@ -63,7 +64,7 @@ class Mobile_LLM(nnx.Module):
         )
 
         # pre-calculate the RoPE thetas
-        omega = calc_rope_omega(config.n_embed, 
+        omega = calc_rope_omega_llama(config.n_embed, 
                                 config.n_head, 
                                 config.block_size,
                                 config.rope_theta, 
