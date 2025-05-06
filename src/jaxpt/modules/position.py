@@ -7,12 +7,12 @@ import jax.numpy as jnp
 def calc_rope_omega_classic(n_embed: int, n_head: int, block_size: int,
                     rope_base_freq: float, dtype: jnp.dtype) -> nnx.Variable:
     query_size = n_embed // n_head
-    pow = jnp.arange(0, query_size, 2)
+    pow = jnp.arange(0, query_size, 2, dtype=dtype)
     omega = rope_base_freq**(pow/query_size)
     omega = jnp.expand_dims(omega, axis=0)
     omega = jnp.repeat(omega, 2, axis=1)
     omega = jnp.repeat(omega, block_size, axis=0)
-    pos = jnp.arange(0, block_size)
+    pos = jnp.arange(0, block_size, dtype=dtype)
     pos = jnp.expand_dims(pos, axis=1)
     omega = omega * pos
     return nnx.Variable(omega)
@@ -21,10 +21,10 @@ def calc_rope_omega_classic(n_embed: int, n_head: int, block_size: int,
 def calc_rope_omega_llama(n_embed: int, n_head: int, block_size: int,
                     rope_base_freq: float, dtype: jnp.dtype) -> nnx.Variable:
     query_size = n_embed // n_head
-    pow = jnp.arange(0, query_size, 2)
+    pow = jnp.arange(0, query_size, 2, dtype=dtype)
     omega = rope_base_freq**(pow/query_size)
     omega = jnp.concat([omega, omega], axis=0)
-    pos = jnp.arange(0, block_size)
+    pos = jnp.arange(0, block_size, dtype=dtype)
     pos = jnp.expand_dims(pos, axis=1)
     omega = omega * pos
     return nnx.Variable(omega)

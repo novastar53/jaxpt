@@ -108,26 +108,26 @@ def from_hf_pretrained(config: MobileLLM_Config, rngs: nnx.Rngs) -> Mobile_LLM:
     hf_m = load_hf_pretrained()
     state = hf_m.state_dict()
 
-    flax_params.wte.embedding.value = jnp.array(state["model.embed_tokens.weight"].numpy())
-    flax_params.rms_n_f.scale.value = jnp.array(state["model.norm.weight"].numpy())
+    flax_params.wte.embedding.value = jnp.array(state["model.embed_tokens.weight"].numpy(), dtype=config.dtype)
+    flax_params.rms_n_f.scale.value = jnp.array(state["model.norm.weight"].numpy(), dtype=config.dtype)
 
     for i in range(len(flax_params.h)):
         # MLP weights
-        flax_params.h[i].mlp.gate.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.gate_proj.weight"].numpy().T)
-        flax_params.h[i].mlp.c_fc.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.up_proj.weight"].numpy().T)
-        flax_params.h[i].mlp.c_proj.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.down_proj.weight"].numpy().T)
+        flax_params.h[i].mlp.gate.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.gate_proj.weight"].numpy().T, dtype=config.dtype)
+        flax_params.h[i].mlp.c_fc.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.up_proj.weight"].numpy().T, dtype=config.dtype)
+        flax_params.h[i].mlp.c_proj.kernel.value = jnp.array(state[f"model.layers.{i}.mlp.down_proj.weight"].numpy().T, dtype=config.dtype)
 
         # RMS Norm weights
-        flax_params.h[i].rms_n_1.scale.value = jnp.array(state[f"model.layers.{i}.input_layernorm.weight"].numpy())
-        flax_params.h[i].rms_n_2.scale.value = jnp.array(state[f"model.layers.{i}.post_attention_layernorm.weight"].numpy()) 
+        flax_params.h[i].rms_n_1.scale.value = jnp.array(state[f"model.layers.{i}.input_layernorm.weight"].numpy(), dtype=config.dtype)
+        flax_params.h[i].rms_n_2.scale.value = jnp.array(state[f"model.layers.{i}.post_attention_layernorm.weight"].numpy(), dtype=config.dtype) 
 
         # Causal self-attention weights
-        flax_params.h[i].attn.wproj.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.o_proj.weight"].numpy().T) 
-        flax_params.h[i].attn.wq.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.q_proj.weight"].numpy().T)
-        wk = jnp.array(state[f"model.layers.{i}.self_attn.k_proj.weight"].numpy().T)
-        wv = jnp.array(state[f"model.layers.{i}.self_attn.v_proj.weight"].numpy().T)
+        flax_params.h[i].attn.wproj.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.o_proj.weight"].numpy().T, dtype=config.dtype) 
+        flax_params.h[i].attn.wq.kernel.value = jnp.array(state[f"model.layers.{i}.self_attn.q_proj.weight"].numpy().T, dtype=config.dtype)
+        wk = jnp.array(state[f"model.layers.{i}.self_attn.k_proj.weight"].numpy().T, dtype=config.dtype)
+        wv = jnp.array(state[f"model.layers.{i}.self_attn.v_proj.weight"].numpy().T, dtype=config.dtype)
         wkv = jnp.concatenate([wk, wv], axis=1)
-        flax_params.h[i].attn.wkv.kernel.value = jnp.array(wkv)
+        flax_params.h[i].attn.wkv.kernel.value = jnp.array(wkv, dtype=config.dtype)
 
     m = nnx.merge(graphdef, flax_params, other_state)
 
