@@ -19,9 +19,12 @@ def top_k_sampling(logits, key, k=50):
 
 # @nnx.jit(static_argnames=("max_length", "temperature", "top_k"))
 def generate(
-    model: nnx.Module, *, x: jax.Array, max_length=50, temperature=0.2, top_k=50
+    model: nnx.Module, *, x: jax.Array, 
+    key: jax.random.PRNGKey,
+    max_length=50, 
+    temperature=0.2, 
+    top_k=50
 ) -> jax.Array:
-    key = jax.random.PRNGKey(0)
 
     while x.shape[1] < max_length:
         logits = model(x)[:, -1, :] / temperature
@@ -31,19 +34,25 @@ def generate(
     return x
 
 
-def generate_completions(model, prefix="Hello, I'm a language model,", num_completions=5, max_length=20):
-  generate_completion = partial(generate, model, max_length=max_length)
-  enc = tiktoken.get_encoding('gpt2')
-  tokens = enc.encode(prefix)
-  tokens = jnp.array(tokens, dtype=jnp.int32)
-  tokens = jnp.expand_dims(tokens, axis=0)
-  x = jnp.tile(tokens, (num_completions, 1))
+def generate_completions(model, 
+                         enc,
+                         prefix="Hello, I'm a language model,", 
+                         num_completions=5, max_length=20, key=None):
 
-  x = generate_completion(x=x) # Make sure you can do a forward pass
-  output = []
-  for i in range(num_completions):
-      tokens = x[i, :max_length].tolist()
-      decoded = enc.decode(tokens)
-      output.append(decoded)
-  return output
 
+    if not key: 
+        key = jax.random.PRNGKey(1337)
+
+    generate_completion = partial(generate, model, key=key, max_length=max_length)
+    tokens = enc.encode(prefix)
+    tokens = jnp.array(tokens, dtype=jnp.int32)
+    tokens = jnp.expand_dims(tokens, axis=0)
+    x = jnp.tile(tokens, (num_completions, 1))
+
+    x = generate_completion(x=x) # Make sure you can do a forward pass
+    output = []
+    for i in range(num_completions):
+        tokens = x[i, :max_length].tolist()
+        decoded = enc.decode(tokens)
+        output.append(decoded)
+    return output
