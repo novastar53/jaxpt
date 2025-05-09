@@ -154,25 +154,48 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.n_head = config.n_head
         self.n_kv_head = config.n_kv_head
         self.implementation = config.sdpa_implementation
+        self.key_cache = None
+        self.value_cache = None
     
     def __call__(self, x):
-        B, T, C = x.shape
+        B, x_T, C = x.shape
         q = self.wq(x) # (B, T, C)
         kv = self.wkv(x) # (B, T, 2 * n_kv_head * C // n_head)
         k, v = jnp.split(kv, 2, axis=-1) # 2 x (B, T, n_kv_head * C // n_head)
 
-        q = q.reshape((B, T, self.n_head, C // self.n_head)) 
+        k_T, v_T = x_T, x_T
+        
+        if self.config.use_cache == True: 
+            if self.key_cache == None:
+                self.key_cache = k
+                k_T = x_T
+            else:
+                self.key_cache = jnp.concat((self.key_cache, k), axis=1)
+                self.key_cache = self.key_cache[:, -self.config.block_size:, :]
+                k_T = self.key_cache.shape[1]
+                k = self.key_cache
+
+            if self.value_cache == None:
+                self.value_cache = v
+                v_T = x_T
+            else:
+                self.value_cache = jnp.concat((self.value_cache, v), axis=1)
+                self.value_cache = self.value_cache[:, -self.config.block_size:, :]
+                v_T = self.key_cache.shape[1]
+                v = self.value_cache
+
+        q = q.reshape((B, x_T, self.n_head, C // self.n_head)) 
         q = self.apply_rope(q)
 
-        k = k.reshape((B, T, self.n_kv_head, C // self.n_head))
+        k = k.reshape((B, k_T, self.n_kv_head, C // self.n_head))
         k = self.apply_rope(k)
         
-        v = v.reshape((B, T, self.n_kv_head, C // self.n_head))
+        v = v.reshape((B, v_T, self.n_kv_head, C // self.n_head))
 
         y = _calc_attention(
             q, k, v, implementation=self.implementation
         ) # (B, T, n_head, C // n_head)
 
-        y = jnp.reshape(y, (B, T, C))
+        y = jnp.reshape(y, (B, x_T, C))
         y = self.wproj(y) 
         return y
