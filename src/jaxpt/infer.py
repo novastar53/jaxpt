@@ -1,3 +1,4 @@
+import sys
 from functools import partial
 
 import jax
@@ -27,7 +28,7 @@ def generate_slow(
     while x.shape[1] < max_length:
         logits = model(x)[:, -1, :] / temperature
         x_next, key = top_k_sampling(logits, key, k=top_k)
-        x_next = x_next.reshape(x_next.shape[0], 1)
+        x_next = x_next[..., None]
         x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
     return x
 
@@ -71,3 +72,31 @@ def generate_completions(model,
         decoded = enc.decode(tokens)
         output.append(decoded)
     return output
+
+
+def generate_chat(model, 
+                    enc=tiktoken.get_encoding("gpt2"),
+                    prefix="Hello, I'm a language model,", 
+                    temperature=0.2,
+                    top_k=50,
+                    key=jax.random.PRNGKey(1337)):
+
+
+    x = enc.encode(prefix)
+    x = jnp.array(x, dtype=jnp.int32)
+    x = x[None, ...]
+
+    print("Model: ", end="")
+    while True:
+        logits = model(x)[:, -1, :] / temperature
+        x_next, key = top_k_sampling(logits, key, k=top_k)
+        if x_next[0] == enc.eos_token_id:
+            break
+        decoded = enc.decode(x_next)
+        print(decoded, end="")
+        sys.stdout.flush()
+        if decoded == ".":
+            break
+        x_next = x_next[..., None]
+        x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
+    print("\n")
