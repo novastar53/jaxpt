@@ -87,16 +87,17 @@ def generate_chat(model,
     x = x[None, ...]
 
     print("Model: ", end="")
-    while True:
-        logits = model(x)[:, -1, :] / temperature
-        x_next, key = top_k_sampling(logits, key, k=top_k)
-        if x_next[0] == enc.eos_token_id:
-            break
-        decoded = enc.decode(x_next)
-        print(decoded, end="")
-        sys.stdout.flush()
-        if decoded == ".":
-            break
-        x_next = x_next[..., None]
-        x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
-    print("\n")
+    try:
+        while True:
+            logits = model(x)[:, -1, :] / temperature
+            key, subkey = jax.random.split(key)
+            x_next, key = top_k_sampling(logits, subkey, k=top_k)
+            if x_next[0] == enc.eos_token_id:
+                break
+            decoded = enc.decode(x_next)
+            print(decoded, end="")
+            sys.stdout.flush()
+            x_next = x_next[..., None]
+            x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
+    except KeyboardInterrupt:
+        print("\n")
