@@ -7,14 +7,13 @@ import tiktoken
 
 
 def top_k_sampling(logits, key, k=50):
-    top_k_indices = jnp.argsort(logits, axis=-1)[..., -k:]
-    top_k_logits = jnp.take_along_axis(logits, top_k_indices, axis=-1)
-    probabilities = jax.nn.softmax(top_k_logits, axis=-1)
-    key, subkey = jax.random.split(key)
-    sampled_index = jax.random.categorical(subkey, probabilities)
-    return jnp.take_along_axis(
-        top_k_indices, sampled_index[..., None], axis=-1
-    ).squeeze(-1), key
+    top_k_logits, top_k_indices = jax.lax.top_k(logits, k=k) # Get the top k logits and indices
+    key, subkey = jax.random.split(key)  # generate a new random key
+    top_k_logit_idxs = jax.random.categorical(subkey, top_k_logits) # sample from the top k logits
+    top_k_logit_idxs = top_k_logit_idxs[..., None] # expand dims
+    sample_idxs = jnp.take_along_axis(top_k_indices, top_k_logit_idxs, axis=-1) # pick out the sampled tokens
+    sample_idxs = sample_idxs[..., 0] # squeeze dims
+    return sample_idxs, key
 
 
 def generate_slow(
@@ -59,7 +58,7 @@ def generate_completions(model,
                          key=jax.random.PRNGKey(1337)):
 
 
-    generate_completion = partial(generate, model, key=key, max_length=max_length)
+    generate_completion = partial(generate_slow, model, key=key, max_length=max_length)
     tokens = enc.encode(prefix)
     tokens = jnp.array(tokens, dtype=jnp.int32)
     tokens = jnp.expand_dims(tokens, axis=0)
