@@ -62,9 +62,9 @@ class RoPE_Llama(RoPE):
         n = x.shape[-1] // 2
         return jnp.concat((-x[..., n:], x[..., :n]), axis=-1)
 
-    def apply_rope(self, v):
+    def apply_rope(self, v, offset=0):
         v = v.swapaxes(1, 2)
-        omega = self.omega[:v.shape[-2], :]
+        omega = self.omega[offset:offset + v.shape[-2], :]
         a = v * jnp.cos(omega) 
         b = self.rotate_half(v) * jnp.sin(omega) 
         y = a + b

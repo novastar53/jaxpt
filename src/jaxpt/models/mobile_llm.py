@@ -18,7 +18,7 @@ class MobileLLM_Config(Config):
     vocab_size: int = 50257  # 50257 padded to the nearest multiple of 64
     n_layer: int = 30 # number of attention blocks
     n_head: int = 9 # number of attention heads
-    n_kv_head: int = 3 # number of shared key-value heads
+    n_kv_head: int = 3 # number of key-value heads 
     n_embed: int = 576  # number token embedding dimensionsa
     n_mlp_hidden: int = 1536 # number of hidden dimensions
     mlp_bias: bool = False # use bias in mlp layers
