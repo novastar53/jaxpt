@@ -26,7 +26,8 @@ def generate_slow(
 ) -> jax.Array:
 
     while x.shape[1] < max_length:
-        logits = model(x)[:, -1, :] / temperature
+        logits = model(x) / temperature
+        logits = logits[:, -1, :]
         x_next, key = top_k_sampling(logits, key, k=top_k)
         x_next = x_next[..., None]
         x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
@@ -40,24 +41,24 @@ def generate(
     top_k=50
 ) -> jax.Array:
 
-    logits = model(x)
+    logits = model(x) / temperature
+    logits = logits[:, -1, :]
     x_next, key = top_k_sampling(logits, key, k=top_k)
-    x_next = jnp.expand_dims(x_next[:, -1], axis=1)
+    x_next = x_next[..., None]
     x = jnp.concatenate([x, x_next], axis=1)  # (B, T+1)#
 
     while x.shape[1] < max_length:
         logits = model(x_next) / temperature
         x_next, key = top_k_sampling(logits, key, k=top_k)
-        #x_next = jnp.expand_dims(x_next, axis=1)
-        x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
+        x = jnp.concatenate((x, x_next), axis=-1)  # (B, T+1)#
     return x
+
 
 def generate_completions(model, 
                          enc=tiktoken.get_encoding("gpt2"),
                          prefix="Hello, I'm a language model,", 
                          num_completions=5, max_length=20, 
                          key=jax.random.PRNGKey(1337)):
-
 
     generate_completion = partial(generate_slow, model, key=key, max_length=max_length)
     tokens = enc.encode(prefix)
