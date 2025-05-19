@@ -167,6 +167,29 @@ class CloudDataLoader(BaseDataLoader):
         return tokens
 
 
+def format_gpt4_chatml_example(example, system_prompt="You are a helpful assistant."):
+    """
+    Format a training example into GPT-4-style ChatML format.
+    
+    Args:
+        example (dict): A dictionary with 'question' and 'answer' fields.
+        system_prompt (str): Optional system instruction to include at the start.
+    
+    Returns:
+        str: A single string in ChatML format suitable for training.
+    """
+    question = example["question"].strip()
+    answer = example["answer"].strip()
+    
+    parts = [
+        "<|im_start|>system\n" + system_prompt + "<|im_end|>\n",
+        "<|im_start|>user\n" + question + "<|im_end|>\n",
+        "<|im_start|>assistant\n" + answer + "<|im_end|>"
+    ]
+
+    return "".join(parts)
+
+
 class HuggingfaceDataLoader(BaseDataLoader):
     def __init__(
         self,
@@ -229,7 +252,71 @@ class HuggingfaceDataLoader(BaseDataLoader):
         self.shard_size = len(tokens)
         return np.array(tokens)
 
-        
+
+class HF_SFT_Dataloader:
+    def __init__(
+        self,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        hf_tokenizer_name: str,
+        hf_dataset_path: str,
+        hf_dataset_name: str,
+        ds_label: str = "train",
+        sft_formatter: Callable = format_gpt4_chatml_example,
+        streaming: bool = True
+    ):
+        self.B = batch_size
+        self.T = block_size
+        self.D = device_rank
+
+        from datasets import load_dataset
+        from transformers import AutoTokenizer
+
+        print(f"Initializing tokenizer {hf_tokenizer_name}")
+        self.tokenizer = AutoTokenizer.from_pretrained(hf_tokenizer_name)
+
+        self.ds = load_dataset(hf_dataset_path, hf_dataset_name, 
+                                             split=ds_label, 
+                                             streaming=streaming)
+        self.iter_ds = iter(self.ds)
+        self.buf_size = self.B * self.T * self.D + 1
+
+        self.sft_formatter = sft_formatter
+        self.cur_tokens = None
+
+
+    def _get_next_example(self):
+        if self.cur_tokens is not None:
+            tokens = self.cur_tokens
+            self.cur_tokens = None
+            return tokens
+        cur_example = next(self.iter_ds)
+        formatted_example = self.sft_formatter(cur_example)
+        tokens = self.tokenizer.encode(formatted_example)
+        return tokens
+
+
+    def __call__(self):
+        buf = np.zeros((self.buf_size,), dtype=np.uint16)
+        buf_pos = 0
+        cur_tokens = self._get_next_example()
+
+        while len(cur_tokens) > self.buf_size: 
+            cur_tokens = self._get_next_example()
+
+        while buf_pos < self.buf_size:
+            if buf_pos + len(cur_tokens) <= self.buf_size: 
+                buf[buf_pos:buf_pos+len(cur_tokens)] = cur_tokens
+                buf_pos += len(cur_tokens)
+            else:
+                self.cur_tokens = cur_tokens
+                break
+
+        X = buf[:-1].reshape((self.D, self.B, self.T))
+        Y = buf[1:].reshape((self.D, self.B, self.T))
+        return jnp.array(X), jnp.array(Y)
+
 
 class CharLoader:
     def __init__(self, text: str):
