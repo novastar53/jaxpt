@@ -2,8 +2,6 @@ import time
 import os
 import sys
 import requests
-from typing import Callable 
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -14,25 +12,12 @@ import tiktoken
 import optax
 
 from jaxpt.models import GPT, from_huggingface_pretrained, GPTConfig
-from jaxpt.dataloaders import DataLoader
 from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
 dataset_url = (
     "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 )
 DATA_CACHE_DIR = Path() / "hellaswag"
-
-
-def calc_validation_loss(model: nnx.Module, loss_fn: Callable, dataloader: DataLoader, eval_steps=10):
-  valid_loss = 0.0
-  for i in range(eval_steps):
-    batch, targets = dataloader()
-    batch = np.squeeze(batch)
-    targets = np.squeeze(targets)
-    loss = loss_fn(model, batch, targets)
-    valid_loss += loss
-  valid_loss /= eval_steps
-  return valid_loss
 
 
 def _download_hellaswag():
