@@ -298,11 +298,16 @@ class SFT_CloudDataLoader:
             # fill the remaining buffer
             buffer[rem:] = self.shard[:self.batch_size-rem, :, :]
             self.shard_pos = self.batch_size-rem
-        x = buffer[:, 0, :]
-        attn_mask = buffer[:, 1, :]
-        loss_mask = buffer[:, 2, :]
-        y = 
-        return jnp.array(buffer)
+        x = buffer[:, 0, :-1]
+        y = buffer[:, 0, 1:]
+        attn_mask = buffer[:, 1, :-1]
+        loss_mask = buffer[:, 2, 1:]
+        return (
+            jnp.array(x), 
+            jnp.array(y), 
+            jnp.array(attn_mask), 
+            jnp.array(loss_mask)
+            )
 
 
     def _list_shards(self, label):
