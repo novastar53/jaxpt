@@ -8,6 +8,28 @@ import jax.numpy as jnp
 
 import tiktoken
 
+class CharLoader:
+    def __init__(self, text: str):
+        self.text = text
+        self.chars = sorted(list(set(text)))
+        self.vocab_size = len(self.chars)
+        self.stoi = {ch: i for i, ch in enumerate(self.chars)}
+        self.itos = {i: ch for i, ch in enumerate(self.chars)}
+        self.encode = lambda s: [self.stoi[c] for c in s]
+        self.decode = lambda l: "".join(self.itos[i] for i in l)
+
+    def get_encoder_decoder(self, text) -> tuple[Callable, Callable]:
+        return self.encode, self.decode, self.vocab_size
+
+    def encode_text(self, text) -> jax.Array:
+        data = jnp.array(self.encode(text), dtype=jnp.int32)
+        return data
+
+    def get_batch(self, key, data: jax.Array, batch_size, block_size):
+        ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
+        x = jnp.stack([data[i : i + block_size] for i in ix])
+        y = jnp.stack([data[i + 1 : i + block_size + 1] for i in ix])
+        return x, y
 
 class BaseDataLoader(ABC):
     """
@@ -167,29 +189,6 @@ class CloudDataLoader(BaseDataLoader):
         return tokens
 
 
-def format_gpt4_chatml_example(example, system_prompt="You are a helpful assistant."):
-    """
-    Format a training example into GPT-4-style ChatML format.
-    
-    Args:
-        example (dict): A dictionary with 'question' and 'answer' fields.
-        system_prompt (str): Optional system instruction to include at the start.
-    
-    Returns:
-        str: A single string in ChatML format suitable for training.
-    """
-    question = example["question"].strip()
-    answer = example["answer"].strip()
-    
-    parts = [
-        "<|im_start|>system\n" + system_prompt + "<|im_end|>\n",
-        "<|im_start|>user\n" + question + "<|im_end|>\n",
-        "<|im_start|>assistant\n" + answer + "<|im_end|>"
-    ]
-
-    return "".join(parts)
-
-
 class HuggingfaceDataLoader(BaseDataLoader):
     def __init__(
         self,
@@ -253,90 +252,74 @@ class HuggingfaceDataLoader(BaseDataLoader):
         return np.array(tokens)
 
 
-class HF_SFT_Dataloader:
+class SFT_CloudDataLoader:
     def __init__(
         self,
+        bucket_name: str,
+        bucket_prefix: str,
         batch_size: int,
         block_size: int,
         device_rank: int,
-        hf_tokenizer_name: str,
-        hf_dataset_path: str,
-        hf_dataset_name: str,
-        ds_label: str = "train",
-        sft_formatter: Callable = format_gpt4_chatml_example,
-        streaming: bool = True
+        label: str | None = None,
+        quiet: bool = False,
     ):
-        self.B = batch_size
-        self.T = block_size
-        self.D = device_rank
+        from google.cloud import storage
 
-        from datasets import load_dataset
-        from transformers import AutoTokenizer
+        self.bucket_name = bucket_name
+        self.bucket_prefix = bucket_prefix
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(bucket_name)
+        self.batch_size = batch_size
+        self.block_size = block_size
+        self.device_rank = device_rank
+        self.label = label
+        self.quiet = quiet
 
-        print(f"Initializing tokenizer {hf_tokenizer_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(hf_tokenizer_name)
-
-        self.ds = load_dataset(hf_dataset_path, hf_dataset_name, 
-                                             split=ds_label, 
-                                             streaming=streaming)
-        self.iter_ds = iter(self.ds)
-        self.buf_size = self.B * self.T * self.D + 1
-
-        self.sft_formatter = sft_formatter
-        self.cur_tokens = None
-
-
-    def _get_next_example(self):
-        if self.cur_tokens is not None:
-            tokens = self.cur_tokens
-            self.cur_tokens = None
-            return tokens
-        cur_example = next(self.iter_ds)
-        formatted_example = self.sft_formatter(cur_example)
-        tokens = self.tokenizer.encode(formatted_example)
-        return tokens
+        self.cur_shard = 0
+        self.shard_pos = 0
+        self.shards = self._list_shards(label)
+        self.shard = self._load_shard()
+        self.shard_size = len(self.shard)
 
 
     def __call__(self):
-        buf = np.zeros((self.buf_size,), dtype=np.uint16)
-        buf_pos = 0
-        cur_tokens = self._get_next_example()
+        buffer = np.empty((self.batch_size, 3, self.block_size), dtype=np.uint16)
+        if self.shard_pos + self.batch_size <= self.shard_size:
+            buffer[:] = self.shard[self.shard_pos:self.shard_pos+self.batch_size, :, :]
+            self.shard_pos += self.batch_size
+        else:
+            # use up the remaining shard
+            rem = self.shard_size - self.shard_pos
+            buffer[:rem] = self.shard[self.shard_pos:, :, :]
+            # load the next shard
+            self.shard = self._load_shard()
+            self.cur_shard += 1
+            self.shard_pos = 0
+            # fill the remaining buffer
+            buffer[rem:] = self.shard[:self.batch_size-rem, :, :]
+            self.shard_pos = self.batch_size-rem
+        x = buffer[:, 0, :]
+        attn_mask = buffer[:, 1, :]
+        loss_mask = buffer[:, 2, :]
+        y = 
+        return jnp.array(buffer)
 
-        while len(cur_tokens) > self.buf_size: 
-            cur_tokens = self._get_next_example()
 
-        while buf_pos < self.buf_size:
-            if buf_pos + len(cur_tokens) <= self.buf_size: 
-                buf[buf_pos:buf_pos+len(cur_tokens)] = cur_tokens
-                buf_pos += len(cur_tokens)
-            else:
-                self.cur_tokens = cur_tokens
-                break
-
-        X = buf[:-1].reshape((self.D, self.B, self.T))
-        Y = buf[1:].reshape((self.D, self.B, self.T))
-        return jnp.array(X), jnp.array(Y)
+    def _list_shards(self, label):
+        blobs = self.bucket.list_blobs(prefix=self.bucket_prefix)
+        return [blob.name for blob in blobs if (label is None or label in blob.name)]
 
 
-class CharLoader:
-    def __init__(self, text: str):
-        self.text = text
-        self.chars = sorted(list(set(text)))
-        self.vocab_size = len(self.chars)
-        self.stoi = {ch: i for i, ch in enumerate(self.chars)}
-        self.itos = {i: ch for i, ch in enumerate(self.chars)}
-        self.encode = lambda s: [self.stoi[c] for c in s]
-        self.decode = lambda l: "".join(self.itos[i] for i in l)
+    def _load_shard(self):
+        from io import BytesIO
 
-    def get_encoder_decoder(self, text) -> tuple[Callable, Callable]:
-        return self.encode, self.decode, self.vocab_size
-
-    def encode_text(self, text) -> jax.Array:
-        data = jnp.array(self.encode(text), dtype=jnp.int32)
-        return data
-
-    def get_batch(self, key, data: jax.Array, batch_size, block_size):
-        ix = jax.random.randint(key, (batch_size,), 0, len(data) - block_size)
-        x = jnp.stack([data[i : i + block_size] for i in ix])
-        y = jnp.stack([data[i + 1 : i + block_size + 1] for i in ix])
-        return x, y
+        if self.cur_shard >= len(self.shards):
+            self.cur_shard = 0
+        shard_name = self.shards[self.cur_shard]
+        blob = self.bucket.blob(shard_name)
+        data = blob.download_as_bytes()
+        tokens = np.load(BytesIO(data))
+        if not isinstance(tokens, np.ndarray):
+            tokens = tokens["arr_0"]
+        self.shard_size = len(tokens)
+        return tokens
