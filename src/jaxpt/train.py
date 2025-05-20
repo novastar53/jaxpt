@@ -8,10 +8,13 @@ def compute_global_norm(grads):
     return jnp.sqrt(sum(jnp.sum(g**2) for g in jax.tree_util.tree_leaves(grads)))
 
 
-def loss_fn(model, batch, targets):
-    logits = model(batch)
-    loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
-    return loss
+def loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
+    logits = model(batch, attn_mask)
+    loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
+    if label_mask is not None:
+        masked_loss = loss * label_mask
+        return masked_loss.sum() / label_mask.sum()
+    return loss.mean()
 
 
 @nnx.jit
@@ -21,9 +24,13 @@ def train_step(model, optimizer, batch, targets):
     return loss, grads
 
 
-@nnx.pmap(axis_name="devices", in_axes=(None, None, 0, 0), out_axes=(0, 0))
-def parallel_train_step(model, optimizer, batch, targets):
-    loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
+@nnx.pmap(axis_name="devices", in_axes=(None, None, 0, 0, 0, 0), out_axes=(0, 0))
+def parallel_train_step(
+    model, optimizer, batch, targets, attn_mask=None, label_mask=None
+    ):
+    loss, grads = nnx.value_and_grad(loss_fn)(
+        model, batch, targets, attn_mask, label_mask
+        )
     loss = jax.lax.pmean(loss, axis_name="devices")
     grads = jax.lax.pmean(grads, axis_name="devices")
     optimizer.update(grads)
@@ -41,9 +48,13 @@ def accum_train_step(model, optimizer, batches, targets):
         if accum_grads is None:
             accum_grads = grads
         else:
-            accum_grads = jax.tree_util.tree_map(lambda x, y: x + y, accum_grads, grads)
+            accum_grads = jax.tree_util.tree_map(
+                lambda x, y: x + y, accum_grads, grads
+                )
         accum_loss += loss
-    avg_grads = jax.tree_util.tree_map(lambda x: x / len(batches), accum_grads)
+    avg_grads = jax.tree_util.tree_map(
+        lambda x: x / len(batches), accum_grads
+        )
     optimizer.update(avg_grads)
     avg_loss = accum_loss / len(batches)
     norm = compute_global_norm(avg_grads)

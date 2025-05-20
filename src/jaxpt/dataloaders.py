@@ -283,10 +283,11 @@ class SFT_CloudDataLoader:
 
 
     def __call__(self):
-        buffer = np.empty((self.batch_size, 3, self.block_size), dtype=np.uint16)
-        if self.shard_pos + self.batch_size <= self.shard_size:
-            buffer[:] = self.shard[self.shard_pos:self.shard_pos+self.batch_size, :, :]
-            self.shard_pos += self.batch_size
+        buffer = np.empty((
+            self.device_rank * self.batch_size, 3, 1 + self.block_size), dtype=np.uint16)
+        if self.shard_pos + self.device_rank * self.batch_size <= self.shard_size:
+            buffer[:] = self.shard[self.shard_pos:self.shard_pos + self.device_rank * self.batch_size, :, :]
+            self.shard_pos += self.device_rank * self.batch_size
         else:
             # use up the remaining shard
             rem = self.shard_size - self.shard_pos
@@ -296,12 +297,12 @@ class SFT_CloudDataLoader:
             self.cur_shard += 1
             self.shard_pos = 0
             # fill the remaining buffer
-            buffer[rem:] = self.shard[:self.batch_size-rem, :, :]
-            self.shard_pos = self.batch_size-rem
-        x = buffer[:, 0, :-1]
-        y = buffer[:, 0, 1:]
-        attn_mask = buffer[:, 1, :-1]
-        loss_mask = buffer[:, 2, 1:]
+            buffer[rem:] = self.shard[:self.device_rank * self.batch_size-rem, :, :]
+            self.shard_pos = self.device_rank * self.batch_size-rem
+        x = buffer[:, 0, :-1].reshape((self.device_rank, self.batch_size, self.block_size))
+        y = buffer[:, 0, 1:].reshape((self.device_rank, self.batch_size, self.block_size))
+        attn_mask = buffer[:, 1, :-1].reshape((self.device_rank, self.batch_size, self.block_size)).astype(np.bool_)
+        loss_mask = buffer[:, 2, 1:].reshape((self.device_rank, self.batch_size, self.block_size)).astype(np.bool_)
         return (
             jnp.array(x), 
             jnp.array(y), 

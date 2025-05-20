@@ -39,6 +39,11 @@ def _calc_attention(
 
     match implementation:
         case 'xla' | 'cudnn':
+            if mask is not None:
+                mask1 = mask[..., :, None] 
+                mask2 = mask[..., None, :]
+                mask = mask1 & mask2
+                mask = mask[:, None, :, :]
             out = jax.nn.dot_product_attention(
                 query, key, value, mask=mask, bias=bias, 
                 is_causal=True, implementation=implementation
@@ -155,7 +160,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.key_cache = None
         self.value_cache = None
     
-    def __call__(self, x):
+    def __call__(self, x, mask=None):
         B, x_T, C = x.shape
         q = self.wq(x) # (B, x_T, C)
         kv = self.wkv(x) # (B, x_T, 2 * n_kv_head * C // n_head)
@@ -194,7 +199,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         v = v.reshape((B, v_T, self.n_kv_head, C // self.n_head))
 
         y = _calc_attention(
-            q, k, v, implementation=self.implementation
+            q, k, v, implementation=self.implementation, mask=mask
         ) # (B, T, n_head, C // n_head)
 
         y = jnp.reshape(y, (B, x_T, C))

@@ -29,6 +29,7 @@ class MobileLLM_Config(Config):
     rope_theta: int = 1e-4 # base frequency for rope
     init_stddev: float = 0.02 # stddev for layer init
     use_cache: bool = False # use kv caching
+    pad_token: str = '<pad>'
 
 
 class Block(nnx.Module):
@@ -47,8 +48,8 @@ class Block(nnx.Module):
         )
         self.mlp = GLU(config, rngs)
     
-    def __call__(self, x):
-        x = self.attn(self.rms_n_1(x)) + x
+    def __call__(self, x, mask=None):
+        x = self.attn(self.rms_n_1(x), mask=mask) + x
         x = self.mlp(self.rms_n_2(x)) + x
         return x
 
@@ -77,10 +78,10 @@ class Mobile_LLM(nnx.Module):
             dtype=config.dtype, rngs=rngs
         )
 
-    def __call__(self, idx):
+    def __call__(self, idx, mask=None):
         x = self.wte(idx)
         for block in self.h:
-            x = block(x)
+            x = block(x, mask)
         x = self.rms_n_f(x)
         logits = self.wte.attend(x)
         return logits
