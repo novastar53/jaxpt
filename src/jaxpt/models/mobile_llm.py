@@ -13,6 +13,7 @@ from jaxpt.modules.position import calc_rope_omega_llama, calc_rope_omega_classi
 
 @dataclass
 class MobileLLM_Config(Config):
+    name: str = "Mobile_LLM"
     dtype: jnp.dtype = jnp.float32
     block_size: int = 2048  # sequence length
     vocab_size: int = 50257  # 50257 padded to the nearest multiple of 64
@@ -99,6 +100,7 @@ class Mobile_LLM(nnx.Module):
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
         nnx.update(model, other_state)
+        return model
 
 
 
