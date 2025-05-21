@@ -87,10 +87,12 @@ def generate_chat(model,
                     system_prompt="You are a helpful assistant.",
                     question="What is photosynthesis?", 
                     format: Literal["chatml", "completion"]="completion",
+                    stop_tokens=['<|endoftext|>', '<|im_end|>'],
                     temperature=0.2,
                     top_k=50,
                     key=jax.random.PRNGKey(1337),
                     logger=logger):
+    stop_tokens = set([enc.encode(s)[0] for s in stop_tokens])
 
     match format: 
         case "chatml":
@@ -107,7 +109,7 @@ def generate_chat(model,
             logits = model(x)[:, -1, :] / temperature
             key, subkey = jax.random.split(key)
             x_next, key = top_k_sampling(logits, subkey, k=top_k)
-            if x_next[0] == enc.eos_token_id:
+            if int(x_next[0]) in stop_tokens:
                 break
             decoded = enc.decode(x_next)
             print(decoded, end="")
@@ -115,4 +117,6 @@ def generate_chat(model,
             x_next = x_next[..., None]
             x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
     except KeyboardInterrupt:
+        pass
+    finally:
         print("\n")
