@@ -1,10 +1,17 @@
 import sys
 from functools import partial
+from typing import Literal
+import logging
 
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 import tiktoken
+
+from jaxpt.chatml import format_as_gpt4_chatml_and_tokenize
+
+
+logger = logging.getLogger(__name__)
 
 
 def top_k_sampling(logits, key, k=50):
@@ -77,16 +84,23 @@ def generate_completions(model,
 
 def generate_chat(model, 
                     enc=tiktoken.get_encoding("gpt2"),
-                    prefix="Hello, I'm a language model,", 
+                    system_prompt="You are a helpful assistant.",
+                    question="What is photosynthesis?", 
+                    format: Literal["chatml", "completion"]="completion",
                     temperature=0.2,
                     top_k=50,
-                    key=jax.random.PRNGKey(1337)):
+                    key=jax.random.PRNGKey(1337),
+                    logger=logger):
 
-
-    x = enc.encode(prefix)
-    x = jnp.array(x, dtype=jnp.int32)
+    match format: 
+        case "chatml":
+            x = format_as_gpt4_chatml_and_tokenize(tokenizer=enc,
+                                            system_prompt=system_prompt,
+                                            question=question,
+                                            logger=logger)
+        case "completion" | _:
+            x = jnp.array(enc.encode(question))
     x = x[None, ...]
-
     print("Model: ", end="")
     try:
         while True:

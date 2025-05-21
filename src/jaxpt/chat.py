@@ -9,6 +9,23 @@ from jaxpt.utils import count_params
 
 from transformers import AutoTokenizer
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Prevent logs from being propagated to the root logger
+logger.propagate = False
+# Remove all existing handlers
+logger.handlers.clear()
+# Create a console handler
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+if not logger.handlers:
+    logger.addHandler(console_handler)
+
 device = "cpu"
 
 key = jax.random.PRNGKey(1337)
@@ -31,7 +48,7 @@ m = from_hf_pretrained(config, rngs)
 graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
 total_params = count_params(m)
 
-print(f"Parameter Count: {total_params:,}")
+logger.info(f"Parameter Count: {total_params:,}")
 #nnx.display(state)
 
 tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
@@ -39,8 +56,10 @@ tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
 while True:
     try:
         user_input = input("You: ")
+        logger.debug(f"User input received: {user_input}")
     except (EOFError, KeyboardInterrupt):
-        print("\nGoodbye!")
+        logger.info("Chat session ended by user.")
         break
 
-    generate_chat(m, enc=tokenizer, prefix=user_input)
+    generate_chat(m, enc=tokenizer, format="chatml", question=user_input,
+                  logger=logger)
