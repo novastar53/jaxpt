@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import flax.nnx as nnx
 
 from jaxpt.modules.attention import CausalSelfAttention
-from jaxpt.modules.mlp import GLU 
+from jaxpt.modules.mlp import GLU
 from jaxpt.modules.config import Config
 
 import orbax.checkpoint as ocp
@@ -19,20 +19,25 @@ class GLUGPTConfig(Config):
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
-    n_mlp_hidden: int = 4 * 768 # hiden size for piecewise FFN
+    n_mlp_hidden: int = 4 * 768  # hiden size for piecewise FFN
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-
 
 
 class Block(nnx.Module):
     def __init__(self, config: GLUGPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.attn = CausalSelfAttention(config, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.mlp = GLU(config, rngs=rngs)
 
@@ -62,7 +67,10 @@ class GLUGPT(nnx.Module):
         )
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
 
     def __call__(self, idx):
@@ -77,14 +85,15 @@ class GLUGPT(nnx.Module):
         logits = self.wte.attend(x)  # (B x T x V)
         return logits
 
-
     def save_checkpoint(self, fpath: str):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
 
     @staticmethod
-    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GLUGPTConfig]):
+    def from_checkpoint(
+        fpath: str, rngs: nnx.Rngs, config=Optional[GLUGPTConfig]
+    ):
         config = config if config else GLUGPTConfig()
         model = GLUGPT(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)
@@ -92,5 +101,3 @@ class GLUGPT(nnx.Module):
         other_state = checkpointer.restore(fpath, target=other_state)
         nnx.update(model, other_state)
         return model
-
-

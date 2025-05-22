@@ -8,6 +8,7 @@ import jax.numpy as jnp
 
 import tiktoken
 
+
 class CharLoader:
     def __init__(self, text: str):
         self.text = text
@@ -31,11 +32,13 @@ class CharLoader:
         y = jnp.stack([data[i + 1 : i + block_size + 1] for i in ix])
         return x, y
 
+
 class BaseDataLoader(ABC):
     """
     Abstract base class for data loaders that yield token batches.
     Subclasses must implement _list_shards and _load_shard.
     """
+
     def __init__(
         self,
         batch_size: int,
@@ -101,7 +104,7 @@ device rank:    {self.D}
 
             # final partial shard
             self.shard_pos = buf_size - buf_pos
-            buf[buf_pos:] = self.shard[:self.shard_pos]
+            buf[buf_pos:] = self.shard[: self.shard_pos]
 
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))
@@ -152,6 +155,7 @@ class CloudDataLoader(BaseDataLoader):
     """
     DataLoader that reads token shards from a Google Cloud Storage bucket.
     """
+
     def __init__(
         self,
         bucket_name: str,
@@ -172,7 +176,9 @@ class CloudDataLoader(BaseDataLoader):
 
     def _list_shards(self, label):
         blobs = self.bucket.list_blobs(prefix=self.bucket_prefix)
-        return [blob.name for blob in blobs if (label is None or label in blob.name)]
+        return [
+            blob.name for blob in blobs if (label is None or label in blob.name)
+        ]
 
     def _load_shard(self):
         from io import BytesIO
@@ -214,14 +220,12 @@ class HuggingfaceDataLoader(BaseDataLoader):
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
 
         self.dataset_objs = []
-        for ds_path, ds_name in zip(dataset_paths, dataset_names):
-            self.dataset_objs.append(load_dataset(ds_path, ds_name, 
-                                             split=label, 
-                                             streaming=streaming))
+        for ds_path, ds_name in zip(dataset_paths, dataset_names, strict=False):
+            self.dataset_objs.append(
+                load_dataset(ds_path, ds_name, split=label, streaming=streaming)
+            )
         ds = interleave_datasets(
-            self.dataset_objs,
-            probabilities=probabilities,
-            seed=random_seed
+            self.dataset_objs, probabilities=probabilities, seed=random_seed
         )
         self.ds = ds.shuffle(buffer_size=buffer_size, seed=random_seed)
         self.iter_ds = iter(self.ds)
@@ -229,7 +233,7 @@ class HuggingfaceDataLoader(BaseDataLoader):
         super().__init__(batch_size, block_size, device_rank, label, quiet)
 
     def _list_shards(self, label):
-        if self.streaming == True:
+        if self.streaming is True:
             return []
         return NotImplementedError
 
@@ -239,14 +243,14 @@ class HuggingfaceDataLoader(BaseDataLoader):
         except StopIteration:
             self.iter_ds = iter(self.ds)
             example = next(self.iter_ds)
-        
-        while example["text"] == None:
+
+        while example["text"] is None:
             try:
                 example = next(self.iter_ds)
             except StopIteration:
                 self.iter_ds = iter(self.ds)
-                example = next(self.iter_ds) 
-          
+                example = next(self.iter_ds)
+
         tokens = self.tokenizer.encode(example["text"])
         self.shard_size = len(tokens)
         return np.array(tokens)
@@ -281,40 +285,63 @@ class SFT_CloudDataLoader:
         self.shard = self._load_shard()
         self.shard_size = len(self.shard)
 
-
     def __call__(self):
-        buffer = np.empty((
-            self.device_rank * self.batch_size, 3, 1 + self.block_size), dtype=np.uint16)
-        if self.shard_pos + self.device_rank * self.batch_size <= self.shard_size:
-            buffer[:] = self.shard[self.shard_pos:self.shard_pos + self.device_rank * self.batch_size, :, :]
+        buffer = np.empty(
+            (self.device_rank * self.batch_size, 3, 1 + self.block_size),
+            dtype=np.uint16,
+        )
+        if (
+            self.shard_pos + self.device_rank * self.batch_size
+            <= self.shard_size
+        ):
+            buffer[:] = self.shard[
+                self.shard_pos : self.shard_pos
+                + self.device_rank * self.batch_size,
+                :,
+                :,
+            ]
             self.shard_pos += self.device_rank * self.batch_size
         else:
             # use up the remaining shard
             rem = self.shard_size - self.shard_pos
-            buffer[:rem] = self.shard[self.shard_pos:, :, :]
+            buffer[:rem] = self.shard[self.shard_pos :, :, :]
             # load the next shard
             self.shard = self._load_shard()
             self.cur_shard += 1
             self.shard_pos = 0
             # fill the remaining buffer
-            buffer[rem:] = self.shard[:self.device_rank * self.batch_size-rem, :, :]
-            self.shard_pos = self.device_rank * self.batch_size-rem
-        x = buffer[:, 0, :-1].reshape((self.device_rank, self.batch_size, self.block_size))
-        y = buffer[:, 0, 1:].reshape((self.device_rank, self.batch_size, self.block_size))
-        attn_mask = buffer[:, 1, :-1].reshape((self.device_rank, self.batch_size, self.block_size)).astype(np.bool_)
-        loss_mask = buffer[:, 2, 1:].reshape((self.device_rank, self.batch_size, self.block_size)).astype(np.bool_)
+            buffer[rem:] = self.shard[
+                : self.device_rank * self.batch_size - rem, :, :
+            ]
+            self.shard_pos = self.device_rank * self.batch_size - rem
+        x = buffer[:, 0, :-1].reshape(
+            (self.device_rank, self.batch_size, self.block_size)
+        )
+        y = buffer[:, 0, 1:].reshape(
+            (self.device_rank, self.batch_size, self.block_size)
+        )
+        attn_mask = (
+            buffer[:, 1, :-1]
+            .reshape((self.device_rank, self.batch_size, self.block_size))
+            .astype(np.bool_)
+        )
+        loss_mask = (
+            buffer[:, 2, 1:]
+            .reshape((self.device_rank, self.batch_size, self.block_size))
+            .astype(np.bool_)
+        )
         return (
-            jnp.array(x), 
-            jnp.array(y), 
-            jnp.array(attn_mask), 
-            jnp.array(loss_mask)
-            )
-
+            jnp.array(x),
+            jnp.array(y),
+            jnp.array(attn_mask),
+            jnp.array(loss_mask),
+        )
 
     def _list_shards(self, label):
         blobs = self.bucket.list_blobs(prefix=self.bucket_prefix)
-        return [blob.name for blob in blobs if (label is None or label in blob.name)]
-
+        return [
+            blob.name for blob in blobs if (label is None or label in blob.name)
+        ]
 
     def _load_shard(self):
         from io import BytesIO

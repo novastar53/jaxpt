@@ -21,7 +21,10 @@ def append_to_csv(file_path, row):
 
 # Model State PyTree Manipulation
 
-def get_param(state: nnx.statelib.State, path: str) -> nnx.variablelib.VariableState:
+
+def get_param(
+    state: nnx.statelib.State, path: str
+) -> nnx.variablelib.VariableState:
     keys = path.split(".")
     param = state
     for key in keys:
@@ -44,13 +47,13 @@ def update_param(
 
 
 def count_params(m: nnx.Module) -> int:
-
     def get_size(y):
         return y.size
 
     _, params, _ = nnx.split(m, nnx.Param, nnx.Variable)
     param_counts = jax.tree_util.tree_map(get_size, params)
-    total_params = jax.tree_util.tree_reduce(lambda x, y: x + y, param_counts, 0)
+    total_params = jax.tree_util.tree_reduce(
+        lambda x, y: x + y, param_counts, 0
+    )
 
     return total_params
-

@@ -10,46 +10,52 @@ from jaxpt.modules.config import Config
 from jaxpt.modules.position import RoPE_Llama
 
 
-def _calc_slow_attn(q, k, v, mask, bias = None):
-    B, T, n_head, hs = q.shape
+def _calc_slow_attn(q, k, v, mask, bias=None):
+    _, T, _, _ = q.shape
 
-    if bias == None: 
+    if bias is None:
         bias = jnp.zeros(shape=(T, T), dtype=q.dtype)
 
-    q = jnp.transpose(q, axes=(0, 2, 1, 3)) # (B, n_head, T, hs)
-    k = jnp.transpose(k, axes=(0, 2, 3, 1)) # (B, n_head, hs, T)
-    v = jnp.transpose(v, axes=(0, 2, 1, 3)) # (B, n_head, T, hs)
-    att = ( q @ k ) + bias
+    q = jnp.transpose(q, axes=(0, 2, 1, 3))  # (B, n_head, T, hs)
+    k = jnp.transpose(k, axes=(0, 2, 3, 1))  # (B, n_head, hs, T)
+    v = jnp.transpose(v, axes=(0, 2, 1, 3))  # (B, n_head, T, hs)
+    att = (q @ k) + bias
     att = att / math.sqrt(k.shape[-1])  # B, n_head, T, T
-    att = jnp.where(mask[:, :, :T, :T] == 0.0, float('-inf'), att)
+    att = jnp.where(mask[:, :, :T, :T] == 0.0, float("-inf"), att)
     att = jax.nn.softmax(att, axis=-1)
-    y = att @ v # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
-    y = jnp.transpose(y, axes=(0, 2, 1, 3)) # (B, T, n_head, hs)
+    y = att @ v  # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
+    y = jnp.transpose(y, axes=(0, 2, 1, 3))  # (B, T, n_head, hs)
     return y, att
+
 
 def _calc_attention(
     query,
     key,
     value,
-    mask = None,
-    bias = None,
-    implementation: Literal['xla', 'cudnn', 'slow'] | None = None):
-
+    mask=None,
+    bias=None,
+    implementation: Literal["xla", "cudnn", "slow"] | None = None,
+):
     output_shape = jnp.asarray(query).shape
 
     match implementation:
-        case 'xla' | 'cudnn':
+        case "xla" | "cudnn":
             if mask is not None:
                 # Convert a (B x T) mask to a (1 x B x T x T) mask
-                mask1 = mask[..., :, None] 
+                mask1 = mask[..., :, None]
                 mask2 = mask[..., None, :]
                 mask = mask1 & mask2
                 mask = mask[:, None, :, :]
             out = jax.nn.dot_product_attention(
-                query, key, value, mask=mask, bias=bias, 
-                is_causal=True, implementation=implementation
+                query,
+                key,
+                value,
+                mask=mask,
+                bias=bias,
+                is_causal=True,
+                implementation=implementation,
             )
-        case _: 
+        case _:
             out, _ = _calc_slow_attn(query, key, value, mask, bias)
 
     return jnp.reshape(out, output_shape)
@@ -85,7 +91,8 @@ class CausalSelfAttention(SelfAttentionBase):
             self.mask = nnx.Variable(
                 jnp.tril(
                     jnp.ones(
-                        (config.block_size, config.block_size), dtype=config.dtype
+                        (config.block_size, config.block_size),
+                        dtype=config.dtype,
                     ).reshape((1, 1, config.block_size, config.block_size))
                 )
             )
@@ -110,18 +117,17 @@ class CausalSelfAttention(SelfAttentionBase):
             v, (B, T, self.n_head, C // self.n_head)
         )  # B, T, n_head, C // n_head
 
-        y = _calc_attention(
-            q, k, v, implementation=self.implementation
-        )
+        y = _calc_attention(q, k, v, implementation=self.implementation)
 
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)
         return y
 
 
-
 class GQ_Attention(SelfAttentionBase, RoPE_Llama):
-    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+    def __init__(
+        self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+    ):
         RoPE_Llama.__init__(self, omega=rope_omega)
 
         self.config = config
@@ -133,7 +139,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
             bias_init=nnx.initializers.zeros,
             use_bias=config.attention_bias,
             dtype=config.dtype,
-            rngs=rngs
+            rngs=rngs,
         )
         self.wkv = nnx.Linear(
             config.n_embed,
@@ -160,49 +166,53 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.implementation = config.sdpa_implementation
         self.key_cache = None
         self.value_cache = None
-    
+
     def __call__(self, x, mask=None):
         B, x_T, C = x.shape
-        q = self.wq(x) # (B, x_T, C)
-        kv = self.wkv(x) # (B, x_T, 2 * n_kv_head * C // n_head)
-        k, v = jnp.split(kv, 2, axis=-1) # 2 x (B, x_T, n_kv_head * C // n_head)
+        q = self.wq(x)  # (B, x_T, C)
+        kv = self.wkv(x)  # (B, x_T, 2 * n_kv_head * C // n_head)
+        k, v = jnp.split(
+            kv, 2, axis=-1
+        )  # 2 x (B, x_T, n_kv_head * C // n_head)
 
         k_T, v_T = x_T, x_T
 
-        q = q.reshape((B, x_T, self.n_head, C // self.n_head)) 
+        q = q.reshape((B, x_T, self.n_head, C // self.n_head))
         offset = 0
         if self.key_cache is not None:
             offset = self.key_cache.shape[1]
         q = self.apply_rope(q, offset=offset)
-        
-        if self.config.use_cache == True: 
-            if self.key_cache == None:
+
+        if self.config.use_cache is True:
+            if self.key_cache is None:
                 self.key_cache = k
                 k_T = x_T
             else:
                 self.key_cache = jnp.concat((self.key_cache, k), axis=1)
-                self.key_cache = self.key_cache[:, -self.config.block_size:, :]
+                self.key_cache = self.key_cache[:, -self.config.block_size :, :]
                 k_T = self.key_cache.shape[1]
                 k = self.key_cache
 
-            if self.value_cache == None:
+            if self.value_cache is None:
                 self.value_cache = v
                 v_T = x_T
             else:
                 self.value_cache = jnp.concat((self.value_cache, v), axis=1)
-                self.value_cache = self.value_cache[:, -self.config.block_size:, :]
+                self.value_cache = self.value_cache[
+                    :, -self.config.block_size :, :
+                ]
                 v_T = self.key_cache.shape[1]
                 v = self.value_cache
 
         k = k.reshape((B, k_T, self.n_kv_head, C // self.n_head))
         k = self.apply_rope(k)
-        
+
         v = v.reshape((B, v_T, self.n_kv_head, C // self.n_head))
 
         y = _calc_attention(
             q, k, v, implementation=self.implementation, mask=mask
-        ) # (B, T, n_head, C // n_head)
+        )  # (B, T, n_head, C // n_head)
 
         y = jnp.reshape(y, (B, x_T, C))
-        y = self.wproj(y) 
+        y = self.wproj(y)
         return y

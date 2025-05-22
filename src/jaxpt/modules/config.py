@@ -1,7 +1,6 @@
-from abc import ABC
 from dataclasses import dataclass
 
 
 @dataclass
-class Config(ABC):
+class Config:
     name: str = "gpt"

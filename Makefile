@@ -69,7 +69,7 @@ clean:
 
 # Run linting
 lint:
-	uv run ruff check src/jaxpt/
+	uv run ruff check src/jaxpt/ --fix
 
 # Format code
 format:

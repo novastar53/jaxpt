@@ -34,7 +34,9 @@ def run_hf_gpt2():
     generated_tokens = list(input_ids[0].numpy())
     for _ in range(max_length - len(generated_tokens)):
         input_tensor = torch.tensor([generated_tokens])
-        outputs = model(input_tensor, attention_mask=torch.ones_like(input_tensor))
+        outputs = model(
+            input_tensor, attention_mask=torch.ones_like(input_tensor)
+        )
         logits = outputs.logits[:, -1, :].detach().numpy()
         logits_jax = jnp.array(logits) / temperature
         next_token, key = top_k_sampling(logits_jax, key, k=top_k)
@@ -55,7 +57,9 @@ def run_charformer():
     val_data = data[n:]
 
     key = jax.random.PRNGKey(1337)
-    rngs = nnx.Rngs({"dataloader": key, "dropout": key, "params": key, "generate": key})
+    rngs = nnx.Rngs(
+        {"dataloader": key, "dropout": key, "params": key, "generate": key}
+    )
 
     features = 32
     num_heads = 4
@@ -75,7 +79,9 @@ def run_charformer():
     batch_size = 32
     optimizer = nnx.Optimizer(m, optax.adam(1e-3))
 
-    valid_xb, valid_yb = dataloader.get_batch(key, val_data, len(val_data), BLOCK_SIZE)
+    valid_xb, valid_yb = dataloader.get_batch(
+        key, val_data, len(val_data), BLOCK_SIZE
+    )
 
     for steps in range(80):
         key = jax.random.split(key)[0]

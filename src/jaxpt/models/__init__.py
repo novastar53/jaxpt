@@ -5,19 +5,13 @@ from .gpt import (
     GPT,
     from_huggingface_pretrained,
 )
-from .glu_gpt import (
-    GLUGPTConfig,
-    GLUGPT
-)
+from .glu_gpt import GLUGPTConfig, GLUGPT
 from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
 
-from .mobile_llm import (
-    Mobile_LLM,
-    MobileLLM_Config
-)
+from .mobile_llm import Mobile_LLM, MobileLLM_Config
 
 __all__ = [
     "Bigram",

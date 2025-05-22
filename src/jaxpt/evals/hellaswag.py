@@ -4,6 +4,7 @@ import sys
 import requests
 from pathlib import Path
 
+import json
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -14,15 +15,13 @@ import optax
 from jaxpt.models import GPT, from_huggingface_pretrained, GPTConfig
 from transformers import FlaxGPT2LMHeadModel, GPT2LMHeadModel
 
-dataset_url = (
-    "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
-)
+dataset_url = "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
 DATA_CACHE_DIR = Path() / "hellaswag"
 
 
 def _download_hellaswag():
     os.makedirs(DATA_CACHE_DIR, exist_ok=True)
-    data_filename = os.path.join(DATA_CACHE_DIR, f"hellaswag_val.jsonl")
+    data_filename = os.path.join(DATA_CACHE_DIR, "hellaswag_val.jsonl")
     if not os.path.exists(data_filename):
         print(f"Downloading {dataset_url} to {data_filename}...")
         resp = requests.get(dataset_url, stream=True)
@@ -38,7 +37,9 @@ def _predict(model: GPT, tokens, mask):
     logits_flat = logits.reshape(-1, logits.shape[-1])
     tokens = tokens[:, 1:]  # remove the first token
     tokens_flat = tokens.reshape(-1)
-    losses = optax.softmax_cross_entropy_with_integer_labels(logits_flat, tokens_flat)
+    losses = optax.softmax_cross_entropy_with_integer_labels(
+        logits_flat, tokens_flat
+    )
     mask = mask[..., 1:]
     losses = losses.reshape(tokens.shape[0], -1)
     losses = losses * mask
@@ -50,7 +51,9 @@ def _predict(model: GPT, tokens, mask):
 class HellaSwag:
     def __init__(self, model: GPT2LMHeadModel | FlaxGPT2LMHeadModel | GPT):
         _download_hellaswag()
-        self.file = open(os.path.join(DATA_CACHE_DIR, f"hellaswag_val.jsonl"), "r")
+        self.file = open(
+            os.path.join(DATA_CACHE_DIR, "hellaswag_val.jsonl"), "r"
+        )
         self.tokenizer = tiktoken.get_encoding("gpt2")
         self.batch_size = 4
         self.idx = 0
@@ -74,17 +77,25 @@ class HellaSwag:
         endings = example["endings"]
         label = example["label"]
         prompt_tokens = self.tokenizer.encode(prompt)
-        ending_tokens = [self.tokenizer.encode(" " + ending) for ending in endings]
+        ending_tokens = [
+            self.tokenizer.encode(" " + ending) for ending in endings
+        ]
 
         len_prompt = len(prompt_tokens)
         max_ending_len = max(len(ending) for ending in endings)
         mask = jnp.zeros((len(endings), len_prompt + max_ending_len))
-        tokens = jnp.zeros((len(endings), len_prompt + max_ending_len), dtype=jnp.int32)
+        tokens = jnp.zeros(
+            (len(endings), len_prompt + max_ending_len), dtype=jnp.int32
+        )
         for i in range(len(endings)):
             len_tokens = len(prompt_tokens) + len(ending_tokens[i])
-            tokens = tokens.at[i, :len_tokens].set(prompt_tokens + ending_tokens[i])
+            tokens = tokens.at[i, :len_tokens].set(
+                prompt_tokens + ending_tokens[i]
+            )
             mask = mask.at[i, :len_tokens].set(jnp.ones(len_tokens))
-            mask = mask.at[i, : len(prompt_tokens)].set(jnp.zeros(len(prompt_tokens)))
+            mask = mask.at[i, : len(prompt_tokens)].set(
+                jnp.zeros(len(prompt_tokens))
+            )
 
         return tokens, mask, label
 
@@ -106,7 +117,9 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(key)
     checkpoint = Path().absolute() / "checkpoints" / args.run / args.chkpt
-    config = GPTConfig(dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla")
+    config = GPTConfig(
+        dtype=jnp.bfloat16, vocab_size=50304, sdpa_implementation="xla"
+    )
     model = GPT.from_checkpoint(checkpoint, rngs=rngs, config=config)
     # model = from_huggingface_pretrained(rngs=rngs)
     # model = GPT2LMHeadModel.from_pretrained("gpt2")
@@ -116,7 +129,7 @@ if __name__ == "__main__":
 
     total, correct = 0, 0
     start = time.time()
-    for example, pred, label in hellaswag:
+    for _example, pred, label in hellaswag:
         # print(example["ctx"])
         # for ending in example["endings"]:
         #    print(ending)

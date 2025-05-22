@@ -19,20 +19,25 @@ class NoPE_GPTConfig(Config):
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
-    n_mlp_hidden: int = 4 * 768 # hiden size for piecewise FFN
+    n_mlp_hidden: int = 4 * 768  # hiden size for piecewise FFN
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-
 
 
 class Block(nnx.Module):
     def __init__(self, config: NoPE_GPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.attn = CausalSelfAttention(config, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.mlp = MLP(config, rngs=rngs)
 
@@ -55,7 +60,10 @@ class NoPE_GPT(nnx.Module):
         )
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
 
     def __call__(self, idx):
@@ -72,7 +80,9 @@ class NoPE_GPT(nnx.Module):
         ckptr.save(fpath, other_state)
 
     @staticmethod
-    def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[NoPE_GPTConfig]):
+    def from_checkpoint(
+        fpath: str, rngs: nnx.Rngs, config=Optional[NoPE_GPTConfig]
+    ):
         config = config if config else NoPE_GPTConfig()
         model = NoPE_GPT(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)
@@ -80,5 +90,3 @@ class NoPE_GPT(nnx.Module):
         other_state = checkpointer.restore(fpath, target=other_state)
         nnx.update(model, other_state)
         return model
-
-

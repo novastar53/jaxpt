@@ -4,6 +4,7 @@ import flax.nnx as nnx
 
 from jaxpt.modules.config import Config
 
+
 class GLU(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
@@ -54,7 +55,6 @@ class GLU(nnx.Module):
         return y
 
 
-
 class MLP(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
@@ -81,4 +81,3 @@ class MLP(nnx.Module):
         x = nnx.gelu(x, approximate=True)
         x = self.c_proj(x)
         return x
-

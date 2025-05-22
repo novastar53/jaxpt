@@ -13,6 +13,7 @@ from jaxpt.utils import update_param, get_param
 from transformers import GPT2LMHeadModel
 import orbax.checkpoint as ocp
 
+
 @dataclass
 class GPTConfig(Config):
     dtype: jnp.dtype = jnp.float32
@@ -21,20 +22,25 @@ class GPTConfig(Config):
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_embed: int = 768  # number token embedding dimensionsa
-    n_mlp_hidden: int = 4 * 768 # hiden size for piecewise FFN
+    n_mlp_hidden: int = 4 * 768  # hiden size for piecewise FFN
     ln_epsilon: float = 1e-5
     sdpa_implementation: Literal["xla", "cudnn"] = "xla"
-
 
 
 class Block(nnx.Module):
     def __init__(self, config: GPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.attn = CausalSelfAttention(config, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
         self.mlp = MLP(config, rngs=rngs)
 
@@ -64,21 +70,23 @@ class GPT(nnx.Module):
         )
         self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(
-            config.n_embed, epsilon=config.ln_epsilon, dtype=config.dtype, rngs=rngs
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
         )
 
     def __call__(self, idx):
         T = idx.shape[1]
         pos = jnp.arange(0, T, dtype=jnp.uint16)
-        pos_emb = self.wpe(pos) # (T x C)
-        tok_emb = self.wte(idx) # (B x T x C)
+        pos_emb = self.wpe(pos)  # (T x C)
+        tok_emb = self.wte(idx)  # (B x T x C)
         x = tok_emb + pos_emb
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
         logits = self.wte.attend(x)  # (B x T x V)
         return logits
-
 
     def save_checkpoint(self, fpath: str):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)

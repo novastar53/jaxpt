@@ -77,10 +77,18 @@ class AttentionBlock(nnx.Module):
 
 class Charformer(nnx.Module):
     def __init__(
-        self, vocab_size, features, num_heads, num_blocks, block_size, rngs: nnx.Rngs
+        self,
+        vocab_size,
+        features,
+        num_heads,
+        num_blocks,
+        block_size,
+        rngs: nnx.Rngs,
     ):
         self.rngs = rngs
-        self.embed = nnx.Embed(num_embeddings=vocab_size, features=features, rngs=rngs)
+        self.embed = nnx.Embed(
+            num_embeddings=vocab_size, features=features, rngs=rngs
+        )
         self.pos_emb = nnx.Embed(block_size, features, rngs=rngs)
         self.blocks = [
             AttentionBlock(features, num_heads, block_size, rngs=rngs)
