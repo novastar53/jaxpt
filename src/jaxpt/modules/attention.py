@@ -40,6 +40,7 @@ def _calc_attention(
     match implementation:
         case 'xla' | 'cudnn':
             if mask is not None:
+                # Convert a (B x T) mask to a (1 x B x T x T) mask
                 mask1 = mask[..., :, None] 
                 mask2 = mask[..., None, :]
                 mask = mask1 & mask2
