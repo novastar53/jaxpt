@@ -83,6 +83,7 @@ def generate_completions(model,
 
 
 def generate_chat(model, 
+                    x_prev = None,
                     enc=tiktoken.get_encoding("gpt2"),
                     system_prompt="You are a helpful assistant.",
                     question="What is photosynthesis?", 
@@ -99,10 +100,15 @@ def generate_chat(model,
             x = format_as_gpt4_chatml_and_tokenize(tokenizer=enc,
                                             system_prompt=system_prompt,
                                             question=question,
+                                            start=(x_prev is None),
                                             logger=logger)
         case "completion" | _:
             x = jnp.array(enc.encode(question))
+
     x = x[None, ...]
+    if x_prev is not None:
+        x = jnp.concatenate((x_prev, x), axis=1)  # (B, T+1)#
+    logger.debug(f"Context length: {x.shape[1]}")
     print("Model: ", end="")
     try:
         while True:
@@ -120,3 +126,4 @@ def generate_chat(model,
         pass
     finally:
         print("\n")
+    return x

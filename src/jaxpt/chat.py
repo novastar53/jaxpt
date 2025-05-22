@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -6,6 +8,7 @@ from jaxpt.infer import generate_completions, generate, generate_chat
 from jaxpt.models import Mobile_LLM, MobileLLM_Config
 from jaxpt.models.mobile_llm import from_hf_pretrained
 from jaxpt.utils import count_params
+from jaxpt.checkpointers import load_checkpoint
 
 from transformers import AutoTokenizer
 
@@ -30,7 +33,9 @@ device = "cpu"
 
 key = jax.random.PRNGKey(1337)
 rngs = nnx.Rngs(key)
-config = MobileLLM_Config(dtype=jnp.bfloat16, \
+config = MobileLLM_Config(
+                    name="mobile_llm_sft_webinstruct",
+                    dtype=jnp.bfloat16, \
                     vocab_size=49152,
                     n_embed=576,
                     n_head=9,
@@ -42,8 +47,9 @@ config = MobileLLM_Config(dtype=jnp.bfloat16, \
 #m = Mobile_LLM(config, rngs)
 #graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
 #nnx.display(state)
-#m = load_checkpoint("run_20250311_uqdwjq", 5600)
-m = from_hf_pretrained(config, rngs)
+output_dir = Path().absolute() / "alpha_training_runs"
+m = load_checkpoint(Mobile_LLM, output_dir, config, "run_20250521_pakugd", 9000, rngs)
+#m = from_hf_pretrained(config, rngs)
 
 graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
 total_params = count_params(m)
@@ -53,13 +59,15 @@ logger.info(f"Parameter Count: {total_params:,}")
 
 tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
 
-while True:
-    try:
-        user_input = input("You: ")
-        logger.debug(f"User input received: {user_input}")
-    except (EOFError, KeyboardInterrupt):
-        logger.info("Chat session ended by user.")
-        break
-
-    generate_chat(m, enc=tokenizer, format="chatml", question=user_input,
+try:
+    user_input = input("You: ")
+    logger.debug(f"User input received: {user_input}")
+    x = generate_chat(m, enc=tokenizer, format="chatml", question=user_input,
                   logger=logger)
+
+    while True:
+        user_input = input("You: ")
+        x = generate_chat(m, x_prev=x, enc=tokenizer, format="chatml", question=user_input,
+                        logger=logger)
+except (EOFError, KeyboardInterrupt):
+    logger.info("Chat session ended by user.")

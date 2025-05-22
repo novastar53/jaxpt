@@ -9,11 +9,16 @@ logger = logging.getLogger(__name__)
 def format_as_gpt4_chatml_and_tokenize(tokenizer,
                             question="What is photosynthesis?",
                             system_prompt="You are a helpful assistant.",
-                            debug=False,
+                            start=False,
                             logger=logger):
-    
-    x = [
-        "<|im_start|>system\n" + system_prompt + "<|im_end|>\n",
+    if start == True: 
+        x = [
+            "<|im_start|>system\n" + system_prompt + "<|im_end|>\n",
+        ]
+    else:
+        x = []
+
+    x += [
         "<|im_start|>user\n" + question + "<|im_end|>\n",
         "<|im_start|>assistant\n" 
         ] 
