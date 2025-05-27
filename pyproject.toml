@@ -21,6 +21,8 @@ dependencies = [
     "numpy==1.26.4",
     "pydantic>=2.11.4",
     "requests>=2.32.3",
+    "tensorflow>=2.19.0",
+    "tensorflow-datasets>=4.9.8",
     "tiktoken>=0.9.0",
     "torch==2.5.1",
     "transformers>=4.49.0",
