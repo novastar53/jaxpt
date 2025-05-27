@@ -118,6 +118,12 @@ class Block(nnx.Module):
 
 class Model(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
+        self.pos = nnx.Embed(BLOCK_SIZE,
+                             EMBED_DIM,
+                             param_dtype=dtype,
+                             embedding_init=nnx.initializers.lecun_normal(dtype=dtype),
+                             rngs=rngs)
+
         self.embed = nnx.Embed(VOCAB_SIZE, 
                                 EMBED_DIM, 
                                 param_dtype=dtype,
@@ -129,7 +135,11 @@ class Model(nnx.Module):
         ]
     
     def __call__(self, x):
+        _, T = x.shape
+        pos = jnp.arange(0, T, dtype=jnp.uint16)
+        pos_x = self.pos(pos)
         x = self.embed(x)
+        x = x + pos_x
         for layer in self.layers:
             x = layer(x)
         x = self.embed.attend(x)
