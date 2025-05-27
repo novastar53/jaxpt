@@ -1,4 +1,5 @@
 import time 
+import os
 
 import numpy as np
 import jax
@@ -8,6 +9,8 @@ import flax.nnx as nnx
 import optax
 
 import tensorflow_datasets as tfds
+
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 VOCAB_SIZE = 256
 BATCH_SIZE = 64
@@ -164,6 +167,7 @@ if __name__ == "__main__":
     ds = ds.batch(BATCH_SIZE)
 
     rngs = nnx.Rngs(0)
+    
     model = Model(rngs, jnp.float32)
     tx = optax.adam(learning_rate=LEARNING_RATE)
     optimizer = nnx.Optimizer(model, tx)
