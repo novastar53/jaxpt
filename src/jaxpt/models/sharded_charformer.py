@@ -1,3 +1,5 @@
+import time 
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -8,14 +10,14 @@ import optax
 import tensorflow_datasets as tfds
 
 VOCAB_SIZE = 256
-BATCH_SIZE = 384
+BATCH_SIZE = 64
 BLOCK_SIZE = 128
 
 EMBED_DIM = 512
 FF_DIM = 2048
 HEAD_DIM = 128
 
-NUM_LAYERS = 4
+NUM_LAYERS = 2
 NUM_HEADS = 4
 
 LEARNING_RATE = 1e-3
@@ -166,11 +168,16 @@ if __name__ == "__main__":
     tx = optax.adam(learning_rate=LEARNING_RATE)
     optimizer = nnx.Optimizer(model, tx)
     iter = 0
+
     for example in ds:
+        last_step_time = time.time()
         ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
         inputs = ascii_text[:, :-1]
         labels = ascii_text[:, 1:]
         loss = step_fn(model, optimizer, inputs, labels)
-        print(f"{iter}, {loss}")
+        if iter % 10 == 0:
+            new_time = time.time()
+            time_elapsed_seconds = (new_time - last_step_time)
+            print(f"{iter}, {loss}, {time_elapsed_seconds}")
         iter += 1
     
