@@ -13,8 +13,10 @@ BLOCK_SIZE = 128
 
 EMBED_DIM = 512
 FF_DIM = 2048
+HEAD_DIM = 128
 
 NUM_LAYERS = 4
+NUM_HEADS = 4
 
 LEARNING_RATE = 1e-3
 
@@ -33,8 +35,7 @@ def step_fn(model, optimizer, inputs, labels):
     return loss
 
 
-
-class Block(nnx.Module):
+class MLP(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
 
         self.fc = nnx.Linear(
@@ -57,6 +58,61 @@ class Block(nnx.Module):
         x = self.fc(x)
         x = nnx.relu(x)
         x = self.proj(x)
+        return x
+
+
+class Attention(nnx.Module):
+    def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
+        self.q_proj = nnx.Linear(
+            in_features=EMBED_DIM,
+            out_features=EMBED_DIM,
+            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            param_dtype=dtype,
+            rngs=rngs
+        )
+        self.k_proj = nnx.Linear(
+            in_features=EMBED_DIM,
+            out_features=EMBED_DIM,
+            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            param_dtype=dtype,
+            rngs=rngs
+        )
+        self.v_proj = nnx.Linear(
+            in_features=EMBED_DIM,
+            out_features=EMBED_DIM,
+            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            param_dtype=dtype,
+            rngs=rngs
+        )
+        self.out_proj = nnx.Linear(
+            in_features=EMBED_DIM,
+            out_features=EMBED_DIM,
+            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            param_dtype=dtype,
+            rngs=rngs
+        )
+    
+    def __call__(self, x):
+        
+        q = self.q_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        k = self.k_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        v = self.v_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+
+        _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
+        _weights = jax.nn.softmax(_weights_unnormalized)
+        output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
+        output = output.reshape(BATCH_SIZE, BLOCK_SIZE, EMBED_DIM)
+        output = self.out_proj(output)
+        return output
+
+class Block(nnx.Module):
+    def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
+        self.attn = Attention(rngs, dtype)
+        self.mlp = MLP(rngs, dtype)
+    
+    def __call__(self, x):
+        x = x + self.attn(x)
+        x = x + self.mlp(x)
         return x
 
 
