@@ -21,6 +21,8 @@ def loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
 
 @nnx.jit
 def train_step(model, optimizer, batch, targets):
+    batch = batch.squeeze()
+    targets = targets.squeeze()
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
     optimizer.update(grads)
     return loss, grads
