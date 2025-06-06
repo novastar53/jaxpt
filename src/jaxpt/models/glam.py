@@ -8,7 +8,7 @@ import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
 from jaxpt.modules.attention import GQ_Attention
-from jaxpt.modules.mlp import GLU, MLP
+from jaxpt.modules.mlp import GLU, MLP, MOE
 from jaxpt.modules.position import (
     calc_rope_omega_llama,
     calc_rope_omega_classic,
@@ -21,13 +21,15 @@ from jaxpt.modules.position import (
 class GLaM_Config(Config):
     name: str = "GLaM"
     dtype: jnp.dtype = jnp.float32
-    block_size: int = 2048  # sequence length
+    block_size: int = 1024  # sequence length
     vocab_size: int = 50257  # 50257 padded to the nearest multiple of 64
-    n_layer: int = 30  # number of attention blocks
-    n_head: int = 9  # number of attention heads
-    n_kv_head: int = 3  # number of key-value heads
-    n_embed: int = 576  # number token embedding dimensionsa
-    n_mlp_hidden: int = 1536  # number of hidden dimensions
+    n_layer: int = 12  # number of attention blocks
+    n_head: int = 12  # number of attention heads
+    n_kv_head: int = 12  # number of key-value heads
+    n_embed: int = 768  # number token embedding dimensionsa
+    n_experts: int = 12  # number of experts
+    n_top_k_experts: int = 2  # number of top experts to use
+    n_mlp_hidden: int = 3072  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     glu_activation: Literal["gelu", "silu", "sigmoid"] = (
@@ -43,7 +45,7 @@ class GLaM_Config(Config):
     pad_token: str = "<pad>"
 
 
-class Block(nnx.Module):
+class GLU_Block(nnx.Module):
     def __init__(
         self, config: GLaM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
     ) -> None:
@@ -61,6 +63,31 @@ class Block(nnx.Module):
             rngs=rngs,
         )
         self.mlp = GLU(config, rngs)
+
+    def __call__(self, x, mask=None):
+        x = self.attn(self.rms_n_1(x), mask=mask) + x
+        x = self.mlp(self.rms_n_2(x)) + x
+        return x
+
+
+class MOE_Block(nnx.Module):
+    def __init__(
+        self, config: GLaM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+    ) -> None:
+        self.rms_n_1 = nnx.RMSNorm(
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+        self.attn = GQ_Attention(config, rope_omega=rope_omega, rngs=rngs)
+        self.rms_n_2 = nnx.RMSNorm(
+            config.n_embed,
+            epsilon=config.ln_epsilon,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
+        self.mlp = MOE(config, rngs)
 
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
@@ -86,10 +113,12 @@ class GLaM(nnx.Module):
             config.rope_theta,
             config.dtype,
         )
-        self.h = [
-            Block(config, rope_omega=omega, rngs=rngs)
-            for _ in range(config.n_layer)
-        ]
+        self.h = []
+        for _ in range(config.n_layer//2):
+            self.h += [
+                MOE_Block(config, rope_omega=omega, rngs=rngs),
+                GLU_Block(config, rope_omega=omega, rngs=rngs),
+            ]
 
         self.rms_n_f = nnx.RMSNorm(
             config.n_embed,
