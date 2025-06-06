@@ -15,6 +15,15 @@ class MOE(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
+        self.gate = nnx.Linear(
+            config.n_embed,
+            config.n_mlp_hidden,
+            kernel_init=nnx.initializers.normal(stddev=0.02),
+            bias_init=nnx.initializers.zeros,
+            use_bias=config.mlp_bias,
+            dtype=config.dtype,
+            rngs=rngs,
+        )
         self.c_proj = nnx.Linear(
             config.n_mlp_hidden * config.n_experts,
             config.n_embed,
@@ -36,7 +45,7 @@ class MOE(nnx.Module):
             case _:
                 self.activation = nnx.sigmoid
 
-        self.moe_gate = nnx.Linear(
+        self.router_gate = nnx.Linear(
             config.n_embed, 
             config.n_experts, 
             kernel_init=nnx.initializers.normal(stddev=0.02),
@@ -53,21 +62,25 @@ class MOE(nnx.Module):
         nE = self.config.n_experts
         K = self.config.n_top_k_experts
 
-        gate = self.moe_gate(x) # B x T x nE
-        gate_probs = nnx.softmax(gate, axis=-1) # B x T x nE
-        gate_top_k_probs, gate_top_k_indices  = jax.lax.top_k(gate, K)
+        router_logits = self.router_gate(x) # B x T x nE
+        router_probs = nnx.softmax(router_logits, axis=-1) # B x T x nE
+        router_top_k_probs, router_top_k_indices  = jax.lax.top_k(moe_probs, K)
 
         c_fc_kernel = self.c_fc.kernel.reshape(C, H, nE) # (C x H x nE)
-        c_fc_top_k = c_fc_kernel[:, :, gate_top_k_indices].reshape(B, T, C, H, nE)
-        h = jnp.einsum("btc,btchk->bthk", x, c_fc_top_k) # (B, T, H, K)
+        c_fc_top_k = jnp.take(c_fc_kernel, router_top_k_indices, axis=-1)
+        h = jnp.einsum("btc,chbtk->bthk", x, c_fc_top_k) # (B, T, H, K)
 
-        h = self.activation(h)
+        gate_kernel = self.gate.c_fc.kernel.reshape(C, H, nE)
+        gate_top_k = jnp.take(gate_kernel, router_top_k_indices, axis=-1)
+        g = jnp.einsum("btc,chbtk->bthk", x, gate_top_k) # (B, T, H, K)
+        g = self.activation(g)
+
+        h = g * h 
 
         c_proj_kernel = self.c_proj.kernel.reshape(H, C, nE)
-        c_proj_top_k = c_proj_kernel[:, :, idxs].reshape(B, T, H, C, K)
-        o1 = jnp.einsum("bthp,bthck->btck", h, c_proj_top_k)
-        o = jnp.einsum("btck,btk->btc", o1, gate_top_k_probs)
-
+        c_proj_top_k = jnp.take(c_proj_kernel, router_top_k_indices, axis=-1)
+        o = jnp.einsum("bthk,hcbtk->btck", h, c_proj_top_k)
+        o = jnp.einsum("btck,btk->btc", o1, router_itop_k_probs) # weighted sum of experts
         return o
 
 
