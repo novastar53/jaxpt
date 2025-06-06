@@ -1,5 +1,6 @@
 import time 
 import os
+import functools
 
 import numpy as np
 import jax
@@ -10,7 +11,9 @@ import optax
 
 import tensorflow_datasets as tfds
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+
+print(f"num devices: {jax.device_count()}")
 
 VOCAB_SIZE = 256
 BATCH_SIZE = 64
@@ -23,7 +26,14 @@ HEAD_DIM = 128
 NUM_LAYERS = 2
 NUM_HEADS = 4
 
+FSDP = 4
+TENSOR = 1
+
 LEARNING_RATE = 1e-3
+
+DTYPE = jnp.float32
+
+key = jax.random.key(1337)
 
 
 def loss_fn(model, inputs, labels):
@@ -40,6 +50,16 @@ def step_fn(model, optimizer, inputs, labels):
     return loss
 
 
+lecun_init = nnx.with_partitioning(
+    nnx.initializers.lecun_normal(dtype=DTYPE),
+    ("fsdp", "tp")
+)
+zeros_init = nnx.with_partitioning(
+    nnx.initializers.zeros_init(),
+    ("fsdp", "tp")
+)
+
+
 class MLP(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
 
@@ -47,15 +67,21 @@ class MLP(nnx.Module):
             in_features=EMBED_DIM,
             out_features=FF_DIM,
             param_dtype=dtype,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
-            rngs=rngs
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.lecun_normal(dtype=DTYPE), ("fsdp", "tp")
+            ),
+
+            bias_init=zeros_init,
+            rngs=rngs,
+            
         ) 
 
         self.proj = nnx.Linear(
             in_features=FF_DIM,
             out_features=EMBED_DIM,
             param_dtype=dtype,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            kernel_init=lecun_init,
+            bias_init=zeros_init,
             rngs=rngs
         )
     
@@ -71,28 +97,32 @@ class Attention(nnx.Module):
         self.q_proj = nnx.Linear(
             in_features=EMBED_DIM,
             out_features=EMBED_DIM,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            kernel_init=lecun_init,
+            bias_init=zeros_init,
             param_dtype=dtype,
             rngs=rngs
         )
         self.k_proj = nnx.Linear(
             in_features=EMBED_DIM,
             out_features=EMBED_DIM,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            kernel_init=lecun_init,
+            bias_init=zeros_init,
             param_dtype=dtype,
             rngs=rngs
         )
         self.v_proj = nnx.Linear(
             in_features=EMBED_DIM,
             out_features=EMBED_DIM,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            kernel_init=lecun_init,
+            bias_init=zeros_init,
             param_dtype=dtype,
             rngs=rngs
         )
         self.out_proj = nnx.Linear(
             in_features=EMBED_DIM,
             out_features=EMBED_DIM,
-            kernel_init=nnx.initializers.lecun_normal(dtype=dtype),
+            kernel_init=lecun_init,
+            bias_init=zeros_init,
             param_dtype=dtype,
             rngs=rngs
         )
@@ -110,6 +140,7 @@ class Attention(nnx.Module):
         output = self.out_proj(output)
         return output
 
+
 class Block(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
         self.attn = Attention(rngs, dtype)
@@ -126,13 +157,13 @@ class Model(nnx.Module):
         self.pos = nnx.Embed(BLOCK_SIZE,
                              EMBED_DIM,
                              param_dtype=dtype,
-                             embedding_init=nnx.initializers.lecun_normal(dtype=dtype),
+                             embedding_init=lecun_init,
                              rngs=rngs)
 
         self.embed = nnx.Embed(VOCAB_SIZE, 
                                 EMBED_DIM, 
                                 param_dtype=dtype,
-                                embedding_init=nnx.initializers.lecun_normal(dtype=dtype),
+                                embedding_init=lecun_init,
                                 rngs=rngs)
         self.layers = [ 
             Block(rngs, dtype)
@@ -163,12 +194,20 @@ def convert_to_ascii(lines, block_size):
 
 
 if __name__ == "__main__":
+    mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (FSDP, TENSOR)),
+                              ["fsdp", "tp"])
+
+    
     ds = tfds.load('lm1b', split='train', shuffle_files=False)
     ds = ds.batch(BATCH_SIZE)
 
     rngs = nnx.Rngs(0)
+
+    model = Model(rngs, DTYPE)
     
-    model = Model(rngs, jnp.float32)
+    shaped_init = nnx.eval_shape(model, jax.ShapeDtypeStruct((BATCH_SIZE, BLOCK_SIZE)))
+    state_sharding = nnx.get_named_sharding(shaped_init, mesh)
+
     tx = optax.adam(learning_rate=LEARNING_RATE)
     optimizer = nnx.Optimizer(model, tx)
     iter = 0

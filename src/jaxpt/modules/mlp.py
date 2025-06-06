@@ -17,15 +17,6 @@ class MOE(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.gate = nnx.Linear(
-            config.n_embed,
-            config.n_mlp_hidden * config.n_experts,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
-            use_bias=config.mlp_bias,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
         self.c_proj = nnx.Linear(
             config.n_mlp_hidden * config.n_experts,
             config.n_embed,
@@ -72,12 +63,7 @@ class MOE(nnx.Module):
         c_fc_top_k = jnp.take(c_fc_kernel, router_top_k_indices, axis=-1)
         h = jnp.einsum("btc,chbtk->bthk", x, c_fc_top_k) # (B, T, H, K)
 
-        gate_kernel = self.gate.kernel.reshape(C, H, nE)
-        gate_top_k = jnp.take(gate_kernel, router_top_k_indices, axis=-1)
-        g = jnp.einsum("btc,chbtk->bthk", x, gate_top_k) # (B, T, H, K)
-        g = self.activation(g)
-
-        h = g * h 
+        h = nnx.gelu(h, approximate=True)
 
         c_proj_kernel = self.c_proj.kernel.reshape(H, C, nE)
         c_proj_top_k = jnp.take(c_proj_kernel, router_top_k_indices, axis=-1)
