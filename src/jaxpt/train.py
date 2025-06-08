@@ -10,6 +10,16 @@ def compute_global_norm(grads):
     )
 
 
+def moe_loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
+    logits, aux_loss = model(batch, None)
+    loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
+
+    if label_mask is not None:
+        masked_loss = loss * label_mask
+        return masked_loss.sum() / label_mask.sum()
+    return loss.mean() + model.config.aux_loss_coeff * aux_loss
+
+
 def loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
     logits = model(batch, attn_mask)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)

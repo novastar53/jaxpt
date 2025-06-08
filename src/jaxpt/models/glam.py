@@ -22,13 +22,14 @@ class GLaM_Config(Config):
     name: str = "GLaM"
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
-    vocab_size: int = 50257  # 50257 padded to the nearest multiple of 64
+    vocab_size: int = 50304 # 50257 padded to the nearest multiple of 64
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_kv_head: int = 12  # number of key-value heads
     n_embed: int = 768  # number token embedding dimensionsa
     n_experts: int = 64  # number of experts
     n_top_k_experts: int = 2  # number of top experts to use
+    aux_loss_coeff: float = 1e-2 # moe auxiliary loss coefficient
     n_mlp_hidden: int = 3072  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers

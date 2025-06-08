@@ -58,6 +58,8 @@ class MOE(nnx.Module):
         router_logits = self.router_gate(x) # B x T x nE
         router_probs = nnx.softmax(router_logits, axis=-1) # B x T x nE
         router_top_k_probs, router_top_k_indices  = jax.lax.top_k(router_probs, K)
+        router_top_k_total_probs = jnp.sum(router_top_k_probs, axis=-1)
+        router_top_k_probs /= router_top_k_total_probs[..., None]
 
         c_fc_kernel = self.c_fc.kernel.reshape(C, H, nE) # (C x H x nE)
         c_fc_top_k = jnp.take(c_fc_kernel, router_top_k_indices, axis=-1)
