@@ -12,31 +12,32 @@ import optax
 
 import tensorflow_datasets as tfds
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+from jaxpt.utils import count_params
+
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 print(f"num devices: {jax.device_count()}")
 
-VOCAB_SIZE = 256
-BATCH_SIZE = 64
-BLOCK_SIZE = 128
+VOCAB_SIZE = 50000
+BATCH_SIZE = 32
+BLOCK_SIZE = 1024
 
-EMBED_DIM = 512
-FF_DIM = 2048
-HEAD_DIM = 128
+NUM_LAYERS = 16
 
-NUM_LAYERS = 2
-NUM_HEADS = 4
+EMBED_DIM = 1024
+FF_DIM = EMBED_DIM * 4
+NUM_HEADS = 8
+HEAD_DIM = EMBED_DIM // NUM_HEADS
+
 
 DATA_DIMS = 2
 MODEL_DIMS = 4
 
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 
-DTYPE = jnp.float32
+DTYPE = jnp.bfloat16
 
 key = jax.random.key(1337)
-
-
 
 lecun_init = nnx.with_partitioning(
     nnx.initializers.lecun_normal(dtype=DTYPE),
@@ -210,7 +211,10 @@ if __name__ == "__main__":
 
     with mesh:
         sharded_model = create_sharded_model()
+        total_params = count_params(sharded_model)
+        print(f"Parameter Count: {total_params:,}")
 
+        
         ds = tfds.load('lm1b', split='train', shuffle_files=False)
         ds = ds.batch(BATCH_SIZE)
         tx = optax.adam(learning_rate=LEARNING_RATE)
