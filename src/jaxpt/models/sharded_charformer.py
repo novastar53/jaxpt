@@ -27,7 +27,7 @@ NUM_LAYERS = 2
 NUM_HEADS = 4
 
 FSDP = 4
-TENSOR = 1
+TENSOR = 2
 
 LEARNING_RATE = 1e-3
 
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     model = Model(rngs, DTYPE)
     
-    shaped_init = nnx.eval_shape(model, jax.ShapeDtypeStruct((BATCH_SIZE, BLOCK_SIZE)))
+    shaped_init = nnx.eval_shape(model, jax.ShapeDtypeStruct((BATCH_SIZE, BLOCK_SIZE), jnp.uint8))
     state_sharding = nnx.get_named_sharding(shaped_init, mesh)
 
     tx = optax.adam(learning_rate=LEARNING_RATE)
