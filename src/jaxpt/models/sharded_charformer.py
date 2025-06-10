@@ -1,9 +1,10 @@
 import time 
 import os
-import functools
+from functools import partial
 
 import numpy as np
 import jax
+from jax.sharding import Mesh, PartitionSpec, NamedSharding
 import jax.numpy as jnp
 
 import flax.nnx as nnx
@@ -26,8 +27,8 @@ HEAD_DIM = 128
 NUM_LAYERS = 2
 NUM_HEADS = 4
 
-FSDP = 4
-TENSOR = 2
+DATA_DIMS = 2
+MODEL_DIMS = 4
 
 LEARNING_RATE = 1e-3
 
@@ -36,27 +37,14 @@ DTYPE = jnp.float32
 key = jax.random.key(1337)
 
 
-def loss_fn(model, inputs, labels):
-    logits = model(inputs)
-    loss = optax.softmax_cross_entropy_with_integer_labels(logits=logits,
-                                                           labels=labels)
-    return loss.mean()
-    
-
-@nnx.jit
-def step_fn(model, optimizer, inputs, labels):
-    loss, grads = nnx.value_and_grad(loss_fn)(model, inputs, labels)
-    optimizer.update(grads)
-    return loss
-
 
 lecun_init = nnx.with_partitioning(
     nnx.initializers.lecun_normal(dtype=DTYPE),
-    ("fsdp", "tp")
+    (None, "model")
 )
 zeros_init = nnx.with_partitioning(
     nnx.initializers.zeros_init(),
-    ("fsdp", "tp")
+    ("model",)
 )
 
 
@@ -67,13 +55,9 @@ class MLP(nnx.Module):
             in_features=EMBED_DIM,
             out_features=FF_DIM,
             param_dtype=dtype,
-            kernel_init=nnx.with_partitioning(
-                nnx.initializers.lecun_normal(dtype=DTYPE), ("fsdp", "tp")
-            ),
-
+            kernel_init=lecun_init,
             bias_init=zeros_init,
             rngs=rngs,
-            
         ) 
 
         self.proj = nnx.Linear(
@@ -193,34 +177,56 @@ def convert_to_ascii(lines, block_size):
     return result
 
 
-if __name__ == "__main__":
-    mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (FSDP, TENSOR)),
-                              ["fsdp", "tp"])
-
-    
-    ds = tfds.load('lm1b', split='train', shuffle_files=False)
-    ds = ds.batch(BATCH_SIZE)
-
+@nnx.jit
+def create_sharded_model():
     rngs = nnx.Rngs(0)
+    model = Model(rngs)
+    state = nnx.state(model)
+    pspecs = nnx.get_partition_spec(state)
+    sharded_state = jax.lax.with_sharding_constraint(state, pspecs)
+    nnx.update(model, sharded_state)
+    return model
 
-    model = Model(rngs, DTYPE)
+
+def loss_fn(model, inputs, labels):
+    logits = model(inputs)
+    loss = optax.softmax_cross_entropy_with_integer_labels(logits=logits,
+                                                           labels=labels)
+    return loss.mean()
     
-    shaped_init = nnx.eval_shape(model, jax.ShapeDtypeStruct((BATCH_SIZE, BLOCK_SIZE), jnp.uint8))
-    state_sharding = nnx.get_named_sharding(shaped_init, mesh)
 
-    tx = optax.adam(learning_rate=LEARNING_RATE)
-    optimizer = nnx.Optimizer(model, tx)
-    iter = 0
+@nnx.jit
+def step_fn(model, optimizer, inputs, labels):
+    loss, grads = nnx.value_and_grad(loss_fn)(model, inputs, labels)
+    optimizer.update(grads)
+    return loss
 
-    for example in ds:
-        last_step_time = time.time()
-        ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
-        inputs = ascii_text[:, :-1]
-        labels = ascii_text[:, 1:]
-        loss = step_fn(model, optimizer, inputs, labels)
-        if iter % 10 == 0:
-            new_time = time.time()
-            time_elapsed_seconds = (new_time - last_step_time)
-            print(f"{iter}, {loss}, {time_elapsed_seconds}")
-        iter += 1
+
+if __name__ == "__main__":
+    mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
+                              ["data", "model"])
     
+    data_sharding = NamedSharding(mesh, PartitionSpec("data", None))
+
+    with mesh:
+        sharded_model = create_sharded_model()
+
+        ds = tfds.load('lm1b', split='train', shuffle_files=False)
+        ds = ds.batch(BATCH_SIZE)
+        tx = optax.adam(learning_rate=LEARNING_RATE)
+        optimizer = nnx.Optimizer(sharded_model, tx)
+        iter = 0
+
+        for example in ds:
+            last_step_time = time.time()
+            ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
+            inputs = ascii_text[:, :-1]
+            labels = ascii_text[:, 1:]
+            inputs = jax.device_put(inputs, data_sharding)
+            labels = jax.device_put(inputs, data_sharding)
+            loss = step_fn(sharded_model, optimizer, inputs, labels)
+            if iter % 10 == 0:
+                new_time = time.time()
+                time_elapsed_seconds = (new_time - last_step_time)
+                print(f"{iter}, {loss}, {time_elapsed_seconds}")
+            iter += 1
