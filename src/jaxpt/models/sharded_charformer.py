@@ -213,6 +213,8 @@ if __name__ == "__main__":
         sharded_model = create_sharded_model()
         total_params = count_params(sharded_model)
         print(f"Parameter Count: {total_params:,}")
+        flops = 6 * (BATCH_SIZE * BLOCK_SIZE) * total_params
+        print(f"FLOPS: {flops:,}")
 
         
         ds = tfds.load('lm1b', split='train', shuffle_files=False)
