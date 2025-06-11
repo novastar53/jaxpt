@@ -18,17 +18,16 @@ from jaxpt.utils import count_params
 
 print(f"num devices: {jax.device_count()}")
 
-VOCAB_SIZE = 50000
+VOCAB_SIZE = 50304
 BATCH_SIZE = 32
-BLOCK_SIZE = 1024
+BLOCK_SIZE = 8192
 
-NUM_LAYERS = 16
+NUM_LAYERS = 48
 
-EMBED_DIM = 1024
-FF_DIM = EMBED_DIM * 4
-NUM_HEADS = 8
+EMBED_DIM = 4096
+FF_DIM = 14336
+NUM_HEADS = 32
 HEAD_DIM = EMBED_DIM // NUM_HEADS
-
 
 DATA_DIMS = 2
 MODEL_DIMS = 4
@@ -206,8 +205,10 @@ def step_fn(model, optimizer, inputs, labels):
 if __name__ == "__main__":
     mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
                               ["data", "model"])
-    
+
+    print(mesh) 
     data_sharding = NamedSharding(mesh, PartitionSpec("data", None))
+
 
     with mesh:
         sharded_model = create_sharded_model()
@@ -215,14 +216,15 @@ if __name__ == "__main__":
         print(f"Parameter Count: {total_params:,}")
         flops = 6 * (BATCH_SIZE * BLOCK_SIZE) * total_params
         print(f"FLOPS: {flops:,}")
+        flops_per_device = flops / jax.device_count()
+        print(f"FLOPS/device: {flops_per_device:,.4f}")
 
-        
-        ds = tfds.load('lm1b', split='train', shuffle_files=False)
-        ds = ds.batch(BATCH_SIZE)
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
         iter = 0
 
+        ds = tfds.load('lm1b', split='train', shuffle_files=False)
+        ds = ds.batch(BATCH_SIZE)
         for example in ds:
             last_step_time = time.time()
             ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
@@ -234,5 +236,6 @@ if __name__ == "__main__":
             if iter % 10 == 0:
                 new_time = time.time()
                 time_elapsed_seconds = (new_time - last_step_time)
-                print(f"{iter}, {loss}, {time_elapsed_seconds}")
+                per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
+                print(f"iter: {iter}, loss: {loss}, time_elapsed: {time_elapsed_seconds}, tflops/device/s: {per_device_tflops_per_second}")
             iter += 1
