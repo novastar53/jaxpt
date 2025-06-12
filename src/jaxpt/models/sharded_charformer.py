@@ -1,6 +1,7 @@
 import time 
 import os
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 import jax
@@ -10,23 +11,25 @@ import jax.numpy as jnp
 import flax.nnx as nnx
 import optax
 
+import orbax.checkpoint as ocp
+
 import tensorflow_datasets as tfds
 
 from jaxpt.utils import count_params
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 print(f"num devices: {jax.device_count()}")
 
-VOCAB_SIZE = 50304
+VOCAB_SIZE = 500
 BATCH_SIZE = 32
-BLOCK_SIZE = 8192
+BLOCK_SIZE = 128
 
-NUM_LAYERS = 48
+NUM_LAYERS = 2
 
-EMBED_DIM = 4096
-FF_DIM = 14336
-NUM_HEADS = 32
+EMBED_DIM = 128
+FF_DIM = EMBED_DIM * 4
+NUM_HEADS = 4
 HEAD_DIM = EMBED_DIM // NUM_HEADS
 
 DATA_DIMS = 2
@@ -110,12 +113,16 @@ class Attention(nnx.Module):
             param_dtype=dtype,
             rngs=rngs
         )
+        #self.key_cache = jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM))
+        #self.value_cache = jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM))
     
     def __call__(self, x):
         
         q = self.q_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
         k = self.k_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        #self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
         v = self.v_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        #self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, k, pos, 1)
 
         _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
         _weights = jax.nn.softmax(_weights_unnormalized)
@@ -154,9 +161,9 @@ class Model(nnx.Module):
             for _ in range(NUM_LAYERS)
         ]
     
-    def __call__(self, x):
+    def __call__(self, x, pos=0):
         _, T = x.shape
-        pos = jnp.arange(0, T, dtype=jnp.uint16)
+        pos = jnp.arange(pos, pos+T, dtype=jnp.uint16)
         pos_x = self.pos(pos)
         x = self.embed(x)
         x = x + pos_x
@@ -188,6 +195,16 @@ def create_sharded_model():
     return model
 
 
+def load_sharded_model(fpath):
+    rngs = nnx.Rngs(0)
+    abstract_model = nnx.eval_shape(lambda: Model(rngs))
+    graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
+    checkpointer = ocp.StandardCheckpointer()
+    restored_state = checkpointer.restore(fpath, target=other_state)
+    model = nnx.merge(graphdef, rngstate, restored_state)
+    return model
+
+
 def loss_fn(model, inputs, labels):
     logits = model(inputs)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits=logits,
@@ -202,7 +219,7 @@ def step_fn(model, optimizer, inputs, labels):
     return loss
 
 
-if __name__ == "__main__":
+def train():
     mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
                               ["data", "model"])
 
@@ -221,21 +238,45 @@ if __name__ == "__main__":
 
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
-        iter = 0
 
         ds = tfds.load('lm1b', split='train', shuffle_files=False)
         ds = ds.batch(BATCH_SIZE)
-        for example in ds:
+        ds = iter(ds)
+        for step in range(30):
             last_step_time = time.time()
+            example = next(ds)
             ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
             inputs = ascii_text[:, :-1]
             labels = ascii_text[:, 1:]
             inputs = jax.device_put(inputs, data_sharding)
             labels = jax.device_put(inputs, data_sharding)
             loss = step_fn(sharded_model, optimizer, inputs, labels)
-            if iter % 10 == 0:
+            if step % 10 == 0:
                 new_time = time.time()
                 time_elapsed_seconds = (new_time - last_step_time)
                 per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
-                print(f"iter: {iter}, loss: {loss}, time_elapsed: {time_elapsed_seconds}, tflops/device/s: {per_device_tflops_per_second}")
-            iter += 1
+                print(f"step: {step}, loss: {loss}, time_elapsed: {time_elapsed_seconds}, tflops/device/s: {per_device_tflops_per_second}")
+            step += 1
+
+        _, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
+        ckptr = ocp.StandardCheckpointer()
+        path = Path().absolute() / "checkpoints" / "charformer_ckpt"
+        ckptr.save(path, other_state)
+
+        time.sleep(5)
+
+def infer(model):
+    mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
+                            ("data, model"))
+    print(mesh)
+    data_sharding = Namedsharding(mesh, PartitionSpec("data", None))
+
+
+
+if __name__ == "__main__":
+    #train()
+
+    path = Path().absolute() / "checkpoints" / "charformer_ckpt"
+    model = load_sharded_model(path)
+    nnx.display(model)
+    jax.debug.visualize_array_sharding(model.embed.embedding.value)
