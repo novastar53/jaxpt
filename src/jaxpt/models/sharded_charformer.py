@@ -117,17 +117,18 @@ class Attention(nnx.Module):
         #self.value_cache = jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM))
     
     def __call__(self, x):
+        B, T, _ = x.shape
         
-        q = self.q_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
-        k = self.k_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        q = self.q_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+        k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
         #self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
-        v = self.v_proj(x).reshape(BATCH_SIZE, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)
+        v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
         #self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, k, pos, 1)
 
         _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
         _weights = jax.nn.softmax(_weights_unnormalized)
         output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
-        output = output.reshape(BATCH_SIZE, BLOCK_SIZE, EMBED_DIM)
+        output = output.reshape(B, T, EMBED_DIM)
         output = self.out_proj(output)
         return output
 
@@ -173,15 +174,17 @@ class Model(nnx.Module):
         return x
 
 
-def convert_to_ascii(lines, block_size):
-    result = np.zeros(((len(lines), block_size+1)), dtype=np.uint8)
+def prepare_train_batch(lines, block_size):
+    block = np.zeros(((len(lines), block_size+1)), dtype=np.uint8)
     for line_idx, line in enumerate(lines):
         for chr_idx, chr in enumerate(line):
             if chr_idx >= block_size+1:
                 break
-            result[line_idx, chr_idx] = chr
+            block[line_idx, chr_idx] = chr
     
-    return result
+    inputs = block[:, :-1]
+    labels = block[:, 1:]
+    return inputs, labels
 
 
 @nnx.jit
@@ -245,9 +248,8 @@ def train():
         for step in range(30):
             last_step_time = time.time()
             example = next(ds)
-            ascii_text = convert_to_ascii(example['text'].numpy(), BLOCK_SIZE)
-            inputs = ascii_text[:, :-1]
-            labels = ascii_text[:, 1:]
+            #print(example['text'])
+            inputs, labels = prepare_train_batch(example['text'].numpy(), BLOCK_SIZE)
             inputs = jax.device_put(inputs, data_sharding)
             labels = jax.device_put(inputs, data_sharding)
             loss = step_fn(sharded_model, optimizer, inputs, labels)
@@ -266,17 +268,23 @@ def train():
         time.sleep(5)
 
 def infer(model):
-    mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
-                            ("data, model"))
-    print(mesh)
-    data_sharding = Namedsharding(mesh, PartitionSpec("data", None))
-
-
+    text = np.array([b"I am a language model,"])
+    inputs, _ = prepare_train_batch(text, BLOCK_SIZE)
+    logits = model(inputs)
+    preds = jnp.argmax(logits, axis=-1)
+    out_c = chr(preds[0, -1])
+    print(out_c)
+    for idx in range(20):
+        x = jnp.array(preds[:, -1])[None, ...]
+        logits = model(x)
+        preds = jnp.argmax(logits, axis=-1)
+        out_c = chr(preds[0, 0])
+        print(f"{out_c}")
+    
 
 if __name__ == "__main__":
     #train()
 
     path = Path().absolute() / "checkpoints" / "charformer_ckpt"
     model = load_sharded_model(path)
-    nnx.display(model)
-    jax.debug.visualize_array_sharding(model.embed.embedding.value)
+    infer(model)
