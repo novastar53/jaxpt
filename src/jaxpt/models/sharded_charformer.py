@@ -113,21 +113,26 @@ class Attention(nnx.Module):
             param_dtype=dtype,
             rngs=rngs
         )
-        #self.key_cache = jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM))
-        #self.value_cache = jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM))
+        self.key_cache = nnx.Variable(jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)))
+        self.value_cache = nnx.Variable(jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)))
     
-    def __call__(self, x):
+    def __call__(self, x, use_cache=False):
         B, T, _ = x.shape
         
         q = self.q_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
-        k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
-        #self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
-        v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
-        #self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, k, pos, 1)
+        if use_cache:
+            self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
+            self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, k, pos, 1)
+            _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, self.key_cache)
+            _weights = jax.nn.softmax(_weights_unnormalized)
+            output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
+        else:
+            k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+            v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+            _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
+            _weights = jax.nn.softmax(_weights_unnormalized)
+            output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
 
-        _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
-        _weights = jax.nn.softmax(_weights_unnormalized)
-        output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
         output = output.reshape(B, T, EMBED_DIM)
         output = self.out_proj(output)
         return output
@@ -162,14 +167,14 @@ class Model(nnx.Module):
             for _ in range(NUM_LAYERS)
         ]
     
-    def __call__(self, x, pos=0):
+    def __call__(self, x, pos=0, use_cache=False):
         _, T = x.shape
         pos = jnp.arange(pos, pos+T, dtype=jnp.uint16)
         pos_x = self.pos(pos)
         x = self.embed(x)
         x = x + pos_x
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, use_cache=use_cache)
         x = self.embed.attend(x)
         return x
 
