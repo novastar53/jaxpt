@@ -116,19 +116,20 @@ class Attention(nnx.Module):
         self.key_cache = nnx.Variable(jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)))
         self.value_cache = nnx.Variable(jnp.zeros((1, BLOCK_SIZE, NUM_HEADS, HEAD_DIM)))
     
-    def __call__(self, x, use_cache=False):
+    def __call__(self, x, pos=0, use_cache=False):
         B, T, _ = x.shape
         
         q = self.q_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+        k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+        v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
+
         if use_cache:
             self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
-            self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, k, pos, 1)
+            self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, v, pos, 1)
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, self.key_cache)
             _weights = jax.nn.softmax(_weights_unnormalized)
             output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
         else:
-            k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
-            v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
             _weights = jax.nn.softmax(_weights_unnormalized)
             output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
@@ -143,8 +144,8 @@ class Block(nnx.Module):
         self.attn = Attention(rngs, dtype)
         self.mlp = MLP(rngs, dtype)
     
-    def __call__(self, x):
-        x = x + self.attn(x)
+    def __call__(self, x, pos=0, use_cache=False):
+        x = x + self.attn(x, pos=pos, use_cache=use_cache)
         x = x + self.mlp(x)
         return x
 
@@ -169,12 +170,12 @@ class Model(nnx.Module):
     
     def __call__(self, x, pos=0, use_cache=False):
         _, T = x.shape
-        pos = jnp.arange(pos, pos+T, dtype=jnp.uint16)
-        pos_x = self.pos(pos)
+        idx = jnp.arange(pos, pos+T, dtype=jnp.uint16)
+        pos_x = self.pos(idx)
         x = self.embed(x)
         x = x + pos_x
         for layer in self.layers:
-            x = layer(x, use_cache=use_cache)
+            x = layer(x, pos=pos, use_cache=use_cache)
         x = self.embed.attend(x)
         return x
 
@@ -275,13 +276,15 @@ def train():
 def infer(model):
     text = np.array([b"I am a language model,"])
     inputs, _ = prepare_train_batch(text, BLOCK_SIZE)
-    logits = model(inputs)
+    logits = model(inputs, pos=0, use_cache=True)
     preds = jnp.argmax(logits, axis=-1)
     out_c = chr(preds[0, -1])
     print(out_c)
+    pos = len(text[0])
     for idx in range(20):
+        pos += 1
         x = jnp.array(preds[:, -1])[None, ...]
-        logits = model(x)
+        logits = model(x, pos=pos, use_cache=True)
         preds = jnp.argmax(logits, axis=-1)
         out_c = chr(preds[0, 0])
         print(f"{out_c}")
