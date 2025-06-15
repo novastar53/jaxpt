@@ -8,6 +8,7 @@ import numpy as np
 import jax
 from jax.sharding import Mesh, PartitionSpec, NamedSharding
 import jax.numpy as jnp
+from jax.experimental.pallas.ops.tpu import flash_attention as pallas_attention
 
 import flax.nnx as nnx
 import optax
@@ -80,6 +81,14 @@ class MLP(nnx.Module):
         return x
 
 
+def attention_with_masking(_Q, _K, _V, seq_pos=BLOCK_SIZE):
+    query_segment_id = jnp.ones( (1,_Q.shape[1]), dtype=jnp.int32)
+    kv_segment_id = jnp.ones( (1, BLOCK_SIZE), jnp.int32) * jnp.expand_dims(jnp.arange(BLOCK_SIZE) <= seq_pos, axis = 0)
+
+    segment_ids = pallas_attention.SegmentIds( q = query_segment_id, kv = kv_segment_id)
+    return jax.numpy.swapaxes(pallas_attention.mha_reference(jax.numpy.swapaxes(_Q,1,2), jax.numpy.swapaxes(_K,1,2), jax.numpy.swapaxes(_V,1,2), None, segment_ids = segment_ids),1,2)
+
+
 class Attention(nnx.Module):
     def __init__(self, rngs: nnx.Rngs, dtype=jnp.float32):
         self.q_proj = nnx.Linear(
@@ -131,7 +140,8 @@ class Attention(nnx.Module):
             self.value_cache.value = jax.lax.dynamic_update_index_in_dim(self.value_cache.value, v, pos, 1)
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, self.key_cache)
             _weights = jax.nn.softmax(_weights_unnormalized)
-            output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
+            #output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
+            output = attention_with_masking(q, self.key_cache, self.value_cache, seq_pos=pos+T)
         else:
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
             _weights = jax.nn.softmax(_weights_unnormalized)
@@ -281,16 +291,19 @@ def infer(model):
     text = np.array([b"I am a language model,"])
     len_text = len(text[0])
     x, _ = prepare_train_batch(text, len_text)
+    #logits = model(x, pos=0, use_cache=True)
     logits = model(x)
     preds = jnp.argmax(logits, axis=-1)
     out_c = chr(preds[0, -1])
     print(out_c)
     pos = len_text
     for idx in range(20):
+        #x = preds[:, -1][..., None]
         x = jnp.concatenate([x, preds[:, -1][..., None]], axis=-1)
-        logits = model(x) 
+        #logits = model(x, pos=pos, use_cache=True) 
+        logits = model(x)
         preds = jnp.argmax(logits, axis=-1)
-        out_c = chr(preds[0, 0])
+        out_c = chr(preds[0, -1])
         print(f"{out_c}")
         pos += 1
     
