@@ -1,6 +1,7 @@
 import time 
 import os
 from functools import partial
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -123,9 +124,11 @@ class Attention(nnx.Module):
         k = self.k_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
         v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
 
+        #print(pos, jnp.sum(self.key_cache.value))
+
         if use_cache:
-            self.key_cache = jax.lax.dynamic_update_index_in_dim(self.key_cache, k, pos, 1)
-            self.value_cache = jax.lax.dynamic_update_index_in_dim(self.value_cache, v, pos, 1)
+            self.key_cache.value = jax.lax.dynamic_update_index_in_dim(self.key_cache.value, k, pos, 1)
+            self.value_cache.value = jax.lax.dynamic_update_index_in_dim(self.value_cache.value, v, pos, 1)
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, self.key_cache)
             _weights = jax.nn.softmax(_weights_unnormalized)
             output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
@@ -251,13 +254,13 @@ def train():
         ds = tfds.load('lm1b', split='train', shuffle_files=False)
         ds = ds.batch(BATCH_SIZE)
         ds = iter(ds)
-        for step in range(30):
+        for step in range(400):
             last_step_time = time.time()
             example = next(ds)
             #print(example['text'])
             inputs, labels = prepare_train_batch(example['text'].numpy(), BLOCK_SIZE)
             inputs = jax.device_put(inputs, data_sharding)
-            labels = jax.device_put(inputs, data_sharding)
+            labels = jax.device_put(labels, data_sharding)
             loss = step_fn(sharded_model, optimizer, inputs, labels)
             if step % 10 == 0:
                 new_time = time.time()
@@ -269,25 +272,27 @@ def train():
         _, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
         path = Path().absolute() / "checkpoints" / "charformer_ckpt"
+        shutil.rmtree(path)
         ckptr.save(path, other_state)
 
         time.sleep(5)
 
 def infer(model):
     text = np.array([b"I am a language model,"])
-    inputs, _ = prepare_train_batch(text, BLOCK_SIZE)
-    logits = model(inputs, pos=0, use_cache=True)
+    len_text = len(text[0])
+    x, _ = prepare_train_batch(text, len_text)
+    logits = model(x)
     preds = jnp.argmax(logits, axis=-1)
     out_c = chr(preds[0, -1])
     print(out_c)
-    pos = len(text[0])
+    pos = len_text
     for idx in range(20):
-        pos += 1
-        x = jnp.array(preds[:, -1])[None, ...]
-        logits = model(x, pos=pos, use_cache=True)
+        x = jnp.concatenate([x, preds[:, -1][..., None]], axis=-1)
+        logits = model(x) 
         preds = jnp.argmax(logits, axis=-1)
         out_c = chr(preds[0, 0])
         print(f"{out_c}")
+        pos += 1
     
 
 if __name__ == "__main__":
