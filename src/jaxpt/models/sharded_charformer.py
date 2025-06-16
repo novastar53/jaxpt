@@ -304,29 +304,30 @@ def train():
 
         time.sleep(5)
 
+
+#@nnx.jit(static_argnums=(2, 3)) # TODO: Fix inference time jit
+def _pred(model, x, pos, use_cache):
+    logits = model(x, pos=pos, use_cache=use_cache)
+    preds = jnp.argmax(logits, axis=-1)
+    return preds[0, -1]
+
+
 def infer(model):
     text = np.array([b"I am a language model,"])
     len_text = len(text[0])
     x, _ = prepare_train_batch(text, len_text)
-    #logits = model(x, pos=0, use_cache=True)
-    logits = model(x)
-    preds = jnp.argmax(logits, axis=-1)
-    out_c = chr(preds[0, -1])
-    print(out_c)
+    y = _pred(model, x, 0, True)
+    print(chr(y))
     pos = len_text
     for idx in range(20):
-        #x = preds[:, -1][..., None]
-        x = jnp.concatenate([x, preds[:, -1][..., None]], axis=-1)
-        #logits = model(x, pos=pos, use_cache=True) 
-        logits = model(x)
-        preds = jnp.argmax(logits, axis=-1)
-        out_c = chr(preds[0, -1])
-        print(f"{out_c}")
+        x = y[None, None]
+        y = _pred(model, x, pos, True)
+        print(chr(y))
         pos += 1
     
 
 if __name__ == "__main__":
-    train()
+    #train()
 
     path = Path().absolute() / "checkpoints" / "charformer_ckpt"
     model = load_sharded_model(path)
