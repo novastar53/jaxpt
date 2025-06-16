@@ -19,7 +19,7 @@ import tensorflow_datasets as tfds
 
 from jaxpt.utils import count_params
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 print(f"num devices: {jax.device_count()}")
 
@@ -27,11 +27,11 @@ VOCAB_SIZE = 500
 BATCH_SIZE = 32
 BLOCK_SIZE = 128
 
-NUM_LAYERS = 2
+NUM_LAYERS = 10
 
-EMBED_DIM = 128
+EMBED_DIM = 512
 FF_DIM = EMBED_DIM * 4
-NUM_HEADS = 4
+NUM_HEADS = 8
 HEAD_DIM = EMBED_DIM // NUM_HEADS
 
 DATA_DIMS = 2
@@ -225,7 +225,7 @@ def prepare_train_batch(lines, block_size):
 
 @nnx.jit
 def create_sharded_model():
-    rngs = nnx.Rngs(0)
+    rngs = nnx.Rngs(key)
     model = Model(rngs)
     state = nnx.state(model)
     pspecs = nnx.get_partition_spec(state)
@@ -235,7 +235,7 @@ def create_sharded_model():
 
 
 def load_sharded_model(fpath):
-    rngs = nnx.Rngs(0)
+    rngs = nnx.Rngs(key)
     abstract_model = nnx.eval_shape(lambda: Model(rngs))
     graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
     checkpointer = ocp.StandardCheckpointer()
@@ -278,10 +278,11 @@ def train():
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
 
-        ds = tfds.load('lm1b', split='train', shuffle_files=False)
+        ds = tfds.load('lm1b', split='train', 
+        shuffle_files=False)
         ds = ds.batch(BATCH_SIZE)
         ds = iter(ds)
-        for step in range(400):
+        for step in range(4000):
             last_step_time = time.time()
             example = next(ds)
             #print(example['text'])
@@ -299,7 +300,7 @@ def train():
         _, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
         path = Path().absolute() / "checkpoints" / "charformer_ckpt"
-        shutil.rmtree(path)
+        shutil.rmtree(path, ignore_errors=True)
         ckptr.save(path, other_state)
 
         time.sleep(5)
@@ -327,7 +328,7 @@ def infer(model):
     
 
 if __name__ == "__main__":
-    #train()
+    train()
 
     path = Path().absolute() / "checkpoints" / "charformer_ckpt"
     model = load_sharded_model(path)
