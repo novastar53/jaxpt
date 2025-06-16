@@ -24,12 +24,12 @@ from jaxpt.utils import count_params
 print(f"num devices: {jax.device_count()}")
 
 VOCAB_SIZE = 500
-BATCH_SIZE = 32
-BLOCK_SIZE = 128
+BATCH_SIZE = 8
+BLOCK_SIZE = 2048
 
-NUM_LAYERS = 10
+NUM_LAYERS = 24
 
-EMBED_DIM = 512
+EMBED_DIM = 1024
 FF_DIM = EMBED_DIM * 4
 NUM_HEADS = 8
 HEAD_DIM = EMBED_DIM // NUM_HEADS
@@ -310,20 +310,22 @@ def train():
 def _pred(model, x, pos, use_cache):
     logits = model(x, pos=pos, use_cache=use_cache)
     preds = jnp.argmax(logits, axis=-1)
-    return preds[0, -1]
+    return preds
 
 
 def infer(model):
     text = np.array([b"I am a language model,"])
     len_text = len(text[0])
     x, _ = prepare_train_batch(text, len_text)
-    y = _pred(model, x, 0, True)
-    print(chr(y))
+    preds = _pred(model, x, 0, True)
+    print(chr(preds[0,-1]))
     pos = len_text
     for idx in range(20):
-        x = y[None, None]
-        y = _pred(model, x, pos, True)
-        print(chr(y))
+        x = preds[:, -1][..., None]
+        #x = jnp.concatenate((x, preds[:, -1][..., None]), axis=-1)
+        #print(x)
+        preds = _pred(model, x, pos, True)
+        print(chr(preds[0,-1]))
         pos += 1
     
 
