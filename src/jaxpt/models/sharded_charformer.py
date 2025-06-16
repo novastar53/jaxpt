@@ -326,7 +326,7 @@ def infer(model):
     
 
 if __name__ == "__main__":
-    #train()
+    train()
 
     path = Path().absolute() / "checkpoints" / "charformer_ckpt"
     model = load_sharded_model(path)
