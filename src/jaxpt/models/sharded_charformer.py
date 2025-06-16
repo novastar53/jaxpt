@@ -19,15 +19,15 @@ import tensorflow_datasets as tfds
 
 from jaxpt.utils import count_params
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 print(f"num devices: {jax.device_count()}")
 
-VOCAB_SIZE = 50000
+VOCAB_SIZE = 500 # 50000
 BATCH_SIZE = 8
 BLOCK_SIZE = 2048
 
-NUM_LAYERS = 160
+NUM_LAYERS = 2 # 160
 
 EMBED_DIM = 1024
 FF_DIM = EMBED_DIM * 4
@@ -42,6 +42,7 @@ LEARNING_RATE = 1e-4
 DTYPE = jnp.bfloat16
 
 key = jax.random.key(1337)
+rngs = nnx.Rngs(key)
 
 lecun_init = nnx.with_partitioning(
     nnx.initializers.lecun_normal(dtype=DTYPE),
@@ -223,10 +224,9 @@ def prepare_train_batch(lines, block_size):
     return inputs, labels
 
 
-@nnx.jit
-def create_sharded_model():
-    rngs = nnx.Rngs(key)
-    model = Model(rngs, dtype=DTYPE)
+@nnx.jit(static_argnums=(0, 1))
+def create_sharded_model(_Model, dtype, rngs):
+    model = _Model(rngs=rngs, dtype=dtype)
     state = nnx.state(model)
     pspecs = nnx.get_partition_spec(state)
     sharded_state = jax.lax.with_sharding_constraint(state, pspecs)
@@ -267,8 +267,7 @@ def train():
 
 
     with mesh:
-        sharded_model = create_sharded_model()
-
+        sharded_model = create_sharded_model(Model, DTYPE, rngs)
 
         total_params = count_params(sharded_model)
         print(f"Parameter Count: {total_params:,}")

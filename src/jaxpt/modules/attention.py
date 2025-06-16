@@ -72,18 +72,20 @@ class CausalSelfAttention(SelfAttentionBase):
         self.c_attn = nnx.Linear(
             config.n_embed,
             3 * config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             dtype=config.dtype,
             rngs=rngs,
         )
         self.c_proj = nnx.Linear(
             config.n_embed,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
+            ), (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -135,8 +137,10 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.wq = nnx.Linear(
             config.n_embed,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -144,8 +148,10 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.wkv = nnx.Linear(
             config.n_embed,
             2 * config.n_kv_head * config.n_embed // config.n_head,
-            kernel_init=nnx.initializers.normal(stddev=config.init_stddev),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -153,10 +159,10 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.wproj = nnx.Linear(
             config.n_embed,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
+            ), (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,

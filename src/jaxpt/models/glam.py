@@ -17,7 +17,7 @@ from jaxpt.modules.position import (
 )
 
 
-@dataclass
+@dataclass(eq=True, unsafe_hash=True)
 class GLaM_Config(Config):
     name: str = "GLaM"
     dtype: jnp.dtype = jnp.float32
@@ -102,7 +102,9 @@ class GLaM(nnx.Module):
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
-            embedding_init=nnx.initializers.normal(stddev=config.init_stddev),
+            embedding_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev),
+                (None, "model")),
             rngs=rngs,
         )
 
@@ -147,10 +149,10 @@ class GLaM(nnx.Module):
     ):
         config = config if config else GLaM_Config()
         model = GLaM(config=config, rngs=rngs)
-        _, _, other_state = nnx.split(model, nnx.RngState, ...)
+        abstract_model = nnx.eval_shape(lambda: GLaM(config=config, rngs=rngs))
+        graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
-        nnx.update(model, other_state)
+        model = nnx.merge(graphdef, rngstate, restored_state)
         return model
-
 

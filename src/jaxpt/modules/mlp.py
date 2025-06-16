@@ -11,8 +11,8 @@ class MOE(nnx.Module):
         self.c_fc = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden * config.n_experts,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(stddev=0.02),(None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model")),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -20,10 +20,10 @@ class MOE(nnx.Module):
         self.c_proj = nnx.Linear(
             config.n_mlp_hidden * config.n_experts,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
+            ),(None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -41,8 +41,9 @@ class MOE(nnx.Module):
         self.router_gate = nnx.Linear(
             config.n_embed, 
             config.n_experts, 
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
+                stddev=0.02), (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -79,8 +80,10 @@ class GLU(nnx.Module):
         self.c_fc = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model,")),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -88,8 +91,10 @@ class GLU(nnx.Module):
         self.gate = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -97,10 +102,11 @@ class GLU(nnx.Module):
         self.c_proj = nnx.Linear(
             config.n_mlp_hidden,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
+            ), (None, "model")),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros, ("model",)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -129,18 +135,23 @@ class MLP(nnx.Module):
         self.c_fc = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden,
-            kernel_init=nnx.initializers.normal(stddev=0.02),
-            bias_init=nnx.initializers.zeros,
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02),
+                (None, "model")),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                ("model",)),
             dtype=config.dtype,
             rngs=rngs,
         )
         self.c_proj = nnx.Linear(
             config.n_mlp_hidden,
             config.n_embed,
-            kernel_init=nnx.initializers.normal(
+            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),
-            bias_init=nnx.initializers.zeros,
+            ), (None, "model")),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros, ("model",)),
             dtype=config.dtype,
             rngs=rngs,
         )
