@@ -23,11 +23,11 @@ from jaxpt.utils import count_params
 
 print(f"num devices: {jax.device_count()}")
 
-VOCAB_SIZE = 500
+VOCAB_SIZE = 50000
 BATCH_SIZE = 8
 BLOCK_SIZE = 2048
 
-NUM_LAYERS = 24
+NUM_LAYERS = 160
 
 EMBED_DIM = 1024
 FF_DIM = EMBED_DIM * 4
@@ -226,7 +226,7 @@ def prepare_train_batch(lines, block_size):
 @nnx.jit
 def create_sharded_model():
     rngs = nnx.Rngs(key)
-    model = Model(rngs)
+    model = Model(rngs, dtype=DTYPE)
     state = nnx.state(model)
     pspecs = nnx.get_partition_spec(state)
     sharded_state = jax.lax.with_sharding_constraint(state, pspecs)
@@ -268,12 +268,15 @@ def train():
 
     with mesh:
         sharded_model = create_sharded_model()
+
+
         total_params = count_params(sharded_model)
         print(f"Parameter Count: {total_params:,}")
         flops = 6 * (BATCH_SIZE * BLOCK_SIZE) * total_params
         print(f"FLOPS: {flops:,}")
         flops_per_device = flops / jax.device_count()
         print(f"FLOPS/device: {flops_per_device:,.4f}")
+
 
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
@@ -305,6 +308,8 @@ def train():
 
         time.sleep(5)
 
+        return sharded_model
+
 
 #@nnx.jit(static_argnums=(2, 3)) # TODO: Fix inference time jit
 def _pred(model, x, pos, use_cache):
@@ -330,8 +335,10 @@ def infer(model):
     
 
 if __name__ == "__main__":
-    train()
+    model = train()
+    w = model.layers[0].mlp.proj.kernel.value
+    jax.debug.visualize_array_sharding(w)
 
-    path = Path().absolute() / "checkpoints" / "charformer_ckpt"
-    model = load_sharded_model(path)
-    infer(model)
+    #path = Path().absolute() / "checkpoints" / "charformer_ckpt"
+    #model = load_sharded_model(path)
+    #infer(model)
