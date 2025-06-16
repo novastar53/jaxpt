@@ -82,11 +82,23 @@ class MLP(nnx.Module):
 
 
 def attention_with_masking(_Q, _K, _V, seq_pos=BLOCK_SIZE):
+    _, KV_SIZE, _, _ = _K.shape
     query_segment_id = jnp.ones( (1,_Q.shape[1]), dtype=jnp.int32)
-    kv_segment_id = jnp.ones( (1, BLOCK_SIZE), jnp.int32) * jnp.expand_dims(jnp.arange(BLOCK_SIZE) <= seq_pos, axis = 0)
+    kv_segment_id = jnp.ones( (1, KV_SIZE), jnp.int32) * jnp.expand_dims(jnp.arange(KV_SIZE) <= seq_pos, axis = 0)
 
-    segment_ids = pallas_attention.SegmentIds( q = query_segment_id, kv = kv_segment_id)
-    return jax.numpy.swapaxes(pallas_attention.mha_reference(jax.numpy.swapaxes(_Q,1,2), jax.numpy.swapaxes(_K,1,2), jax.numpy.swapaxes(_V,1,2), None, segment_ids = segment_ids),1,2)
+    segment_ids = pallas_attention.SegmentIds( 
+        q = query_segment_id, 
+        kv = kv_segment_id
+    )
+    return jax.numpy.swapaxes(
+        pallas_attention.mha_reference(
+            jax.numpy.swapaxes(_Q,1,2), 
+            jax.numpy.swapaxes(_K,1,2), 
+            jax.numpy.swapaxes(_V,1,2), 
+            None, 
+            segment_ids = segment_ids),
+            1,2
+        )
 
 
 class Attention(nnx.Module):
@@ -136,16 +148,21 @@ class Attention(nnx.Module):
         #print(pos, jnp.sum(self.key_cache.value))
 
         if use_cache:
-            self.key_cache.value = jax.lax.dynamic_update_index_in_dim(self.key_cache.value, k, pos, 1)
-            self.value_cache.value = jax.lax.dynamic_update_index_in_dim(self.value_cache.value, v, pos, 1)
-            _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, self.key_cache)
+            self.key_cache.value = jax.lax.dynamic_update_index_in_dim(
+                self.key_cache.value, k, pos, 1)
+            self.value_cache.value = jax.lax.dynamic_update_index_in_dim(
+                self.value_cache.value, v, pos, 1)
+            _weights_unnormalized = jnp.einsum(
+                "BSHD,BTHD->BHST", q, self.key_cache)
             _weights = jax.nn.softmax(_weights_unnormalized)
             #output = jnp.einsum("BHST,BTHD->BSHD", _weights, self.value_cache)
-            output = attention_with_masking(q, self.key_cache, self.value_cache, seq_pos=pos+T)
+            output = attention_with_masking(q, self.key_cache, self.value_cache, 
+                                            seq_pos=pos+T)
         else:
             _weights_unnormalized = jnp.einsum("BSHD,BTHD->BHST", q, k)
             _weights = jax.nn.softmax(_weights_unnormalized)
-            output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
+            #output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
+            output = attention_with_masking(q, k, v, seq_pos=pos+T)
 
         output = output.reshape(B, T, EMBED_DIM)
         output = self.out_proj(output)
