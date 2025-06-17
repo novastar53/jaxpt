@@ -145,7 +145,7 @@ class GLaM(nnx.Module):
 
     @staticmethod
     def from_checkpoint(
-        fpath: str, rngs: nnx.Rngs, config=Optional[GLaM_Config]
+        fpath: str, rngs: nnx.Rngs, config: Optional[GLaM_Config]
     ):
         config = config if config else GLaM_Config()
         model = GLaM(config=config, rngs=rngs)
@@ -153,6 +153,6 @@ class GLaM(nnx.Module):
         graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
-        model = nnx.merge(graphdef, rngstate, restored_state)
+        model = nnx.merge(graphdef, rngstate, other_state)
         return model
 

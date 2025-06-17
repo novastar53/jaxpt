@@ -4,15 +4,14 @@ from google.cloud import storage
 
 
 def save_checkpoint(m, output_dir, run_dirname, step):
-    checkpoint_path = (
+    checkpoint_dirpath = (
         output_dir
-        / m.name
+        / m.config.name
         / "checkpoints"
         / run_dirname
-        / f"checkpoint-{step}.pt"
     )
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-    m.save_checkpoint(checkpoint_path)
+    checkpoint_dirpath.mkdir(parents=True, exist_ok=True)
+    m.save_checkpoint(checkpoint_dirpath / f"checkpoint-{step}.pt")
 
 
 def load_checkpoint(model, output_dir, config, run_dirname, step, rngs):
