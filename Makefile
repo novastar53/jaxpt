@@ -6,20 +6,24 @@ PYTHON_VERSION ?= 3.12.8
 # Detect platform
 UNAME_M := $(shell uname -m)
 UNAME_S := $(shell uname -s)
+TPUS := $(shell sudo lshw | grep tpu | wc -l)
+
+print-tpus:
+	@echo "$(TPUS)"
 
 # Set JAX extras based on platform
-ifeq ($(UNAME_S),Darwin)
-    ifeq ($(UNAME_M),arm64)
-        JAX_PLATFORM = metal
-    else
-        ifeq ($(UNAME_M),x86_64)
-            JAX_PLATFORM = cuda
-        else
-            $(error Unsupported architecture: $(UNAME_M))
-        endif
-    endif
+ifeq ($(UNAME_S),Linux)
+ ifeq ($(UNAME_M),x86_64)
+  ifeq ($(TPUS),0)
+   JAX_PLATFORM = cuda
+  else
+   JAX_PLATFORM = tpu
+  endif
+ else
+  $(error Unsupported architecture: $(UNAME_M))
+ endif
 else
-    JAX_PLATFORM = cuda
+ JAX_PLATFORM = metal
 endif
 
 print-platform:

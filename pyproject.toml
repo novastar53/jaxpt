@@ -35,6 +35,10 @@ cuda = [
 metal = [
     "jax>=0.5.2",
 ]
+tpu = [
+    "libtpu",
+    "cloud-tpu-client",
+]
 dev = [
     "pytest>=8.0.0",
     "ipykernel>=6.29.5",
