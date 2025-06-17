@@ -253,7 +253,7 @@ class HuggingfaceDataLoader(BaseDataLoader):
 
         tokens = self.tokenizer.encode(example["text"])
         self.shard_size = len(tokens)
-        return np.array(tokens)
+        return jnp.array(tokens, dtype=jnp.uint16)
 
 
 class SFT_CloudDataLoader:
