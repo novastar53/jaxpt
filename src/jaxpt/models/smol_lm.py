@@ -18,8 +18,8 @@ from jaxpt.modules.position import (
 
 
 @dataclass
-class MobileLLM_Config(Config):
-    name: str = "Mobile_LLM"
+class SmolLM_Config(Config):
+    name: str = "SmolLM"
     dtype: jnp.dtype = jnp.float32
     block_size: int = 2048  # sequence length
     vocab_size: int = 50257  # 50257 padded to the nearest multiple of 64
@@ -45,7 +45,7 @@ class MobileLLM_Config(Config):
 
 class Block(nnx.Module):
     def __init__(
-        self, config: MobileLLM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+        self, config: SmolLM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
     ) -> None:
         self.rms_n_1 = nnx.RMSNorm(
             config.n_embed,
@@ -68,8 +68,8 @@ class Block(nnx.Module):
         return x
 
 
-class Mobile_LLM(nnx.Module):
-    def __init__(self, config: MobileLLM_Config, rngs: nnx.Rngs):
+class SmolLM(nnx.Module):
+    def __init__(self, config: SmolLM_Config, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
             config.vocab_size,
@@ -113,10 +113,10 @@ class Mobile_LLM(nnx.Module):
 
     @staticmethod
     def from_checkpoint(
-        fpath: str, rngs: nnx.Rngs, config=Optional[MobileLLM_Config]
+        fpath: str, rngs: nnx.Rngs, config=Optional[SmolLM_Config]
     ):
-        config = config if config else MobileLLM_Config()
-        model = Mobile_LLM(config=config, rngs=rngs)
+        config = config if config else SmolLM_Config()
+        model = SmolLM(config=config, rngs=rngs)
         _, _, other_state = nnx.split(model, nnx.RngState, ...)
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
@@ -124,8 +124,8 @@ class Mobile_LLM(nnx.Module):
         return model
 
 
-def from_hf_pretrained(config: MobileLLM_Config, rngs: nnx.Rngs) -> Mobile_LLM:
-    m = Mobile_LLM(config, rngs)
+def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs) -> smol_LM:
+    m = SmolLM(config, rngs)
     graphdef, flax_params, other_state = nnx.split(m, nnx.Param, ...)
 
     hf_m = load_hf_pretrained()
@@ -198,14 +198,14 @@ def load_hf_pretrained():
     return model
 
 
-def convert_to_hf(m: Mobile_LLM):
+def convert_to_hf(m: Smol_LM):
     import torch
     import numpy as np
 
     _, flax_params, _ = nnx.split(m, nnx.Param, ...)
-    hf_mobile_llm = load_hf_pretrained()
+    hf_smol_llm = load_hf_pretrained()
 
-    state = hf_mobile_llm.state_dict()
+    state = hf_smol_llm.state_dict()
 
     state["model.embed_tokens.weight"] = torch.from_numpy(
         np.array(flax_params.wte.embedding.value)
@@ -251,6 +251,6 @@ def convert_to_hf(m: Mobile_LLM):
             np.array(wv.T)
         )
 
-    hf_mobile_llm.load_state_dict(state, strict=True)
+    hf_smol_llm.load_state_dict(state, strict=True)
 
-    return hf_mobile_llm
+    return hf_smol_llm

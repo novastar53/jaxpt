@@ -10,9 +10,14 @@ from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
-from .glam import GLaM, GLaM_Config
-
-from .mobile_llm import Mobile_LLM, MobileLLM_Config
+from .glam import (
+    GLaM, 
+    GLaM_Config
+)
+from .smol_lm import (
+    SmolLM, 
+    SmolLM_Config
+)
 
 __all__ = [
     "Bigram",
@@ -26,7 +31,8 @@ __all__ = [
     "GLUGPT",
     "NoPE_GPT",
     "RoPE_GPT",
-    "Mobile_LLM",
+    "SmolLM",
+    "SmolLM_Config",
     "GLaM",
     "GLaM_Config",
     "from_huggingface_pretrained",

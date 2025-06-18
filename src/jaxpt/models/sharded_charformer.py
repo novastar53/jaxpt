@@ -335,8 +335,8 @@ def infer(model):
 
 if __name__ == "__main__":
     model = train()
-    w = model.layers[0].mlp.proj.kernel.value
-    jax.debug.visualize_array_sharding(w)
+    #w = model.layers[0].mlp.proj.kernel.value
+    #jax.debug.visualize_array_sharding(w)
 
     #path = Path().absolute() / "checkpoints" / "charformer_ckpt"
     #model = load_sharded_model(path)
