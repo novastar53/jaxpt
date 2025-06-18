@@ -124,7 +124,7 @@ class SmolLM(nnx.Module):
         return model
 
 
-def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs) -> smol_LM:
+def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs) -> SmolLM:
     m = SmolLM(config, rngs)
     graphdef, flax_params, other_state = nnx.split(m, nnx.Param, ...)
 
@@ -198,7 +198,7 @@ def load_hf_pretrained():
     return model
 
 
-def convert_to_hf(m: Smol_LM):
+def convert_to_hf(m: SmolLM):
     import torch
     import numpy as np
 
