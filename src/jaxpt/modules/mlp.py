@@ -11,7 +11,8 @@ class MOE(nnx.Module):
         self.c_fc = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden * config.n_experts,
-            kernel_init=nnx.with_partitioning(nnx.initializers.normal(stddev=0.02),(None, "model")),
+            kernel_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02),(None, "model")),
             bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model")),
             use_bias=config.mlp_bias,
             dtype=config.dtype,

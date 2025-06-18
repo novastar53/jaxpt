@@ -17,7 +17,7 @@ from jaxpt.modules.position import (
 )
 
 
-@dataclass
+@dataclass(eq=True, unsafe_hash=True)
 class SmolLM_Config(Config):
     name: str = "SmolLM"
     dtype: jnp.dtype = jnp.float32
@@ -74,7 +74,9 @@ class SmolLM(nnx.Module):
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
-            embedding_init=nnx.initializers.normal(stddev=config.init_stddev),
+            embedding_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev),
+                (None, "model")),
             rngs=rngs,
         )
 
