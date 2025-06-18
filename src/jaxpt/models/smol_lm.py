@@ -50,6 +50,10 @@ class Block(nnx.Module):
         self.rms_n_1 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                ("model",)
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -57,6 +61,10 @@ class Block(nnx.Module):
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                ("model",)
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -96,6 +104,10 @@ class SmolLM(nnx.Module):
         self.rms_n_f = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                ("model",)
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
