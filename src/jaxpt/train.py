@@ -42,7 +42,7 @@ def train_step(model, optimizer, batch, targets):
     axis_name="devices", in_axes=(None, None, 0, 0, 0, 0), out_axes=(0, 0)
 )
 def parallel_train_step(
-    model, optimizer, batch, targets, attn_mask=None, label_mask=None
+    model, optimizer, batch, targets, attn_mask, label_mask
 ):
     loss, grads = nnx.value_and_grad(loss_fn)(
         model, batch, targets, attn_mask, label_mask
