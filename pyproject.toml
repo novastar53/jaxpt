@@ -44,6 +44,8 @@ dev = [
     "ipykernel>=6.29.5",
     "ruff>=0.2.0",
     "jaxpt",
+    "xprof>=2.20.1",
+    "tensorboard>=2.19.0",
 ]
 
 [tool.hatch.build]

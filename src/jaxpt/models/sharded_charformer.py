@@ -276,6 +276,8 @@ def train():
         flops_per_device = flops / jax.device_count()
         print(f"FLOPS/device: {flops_per_device:,.4f}")
 
+        return sharded_model
+
 
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
@@ -334,7 +336,8 @@ def infer(model):
     
 
 if __name__ == "__main__":
-    model = train()
+    with jax.profiler.trace("/tmp/tensorboard"):
+        model = train()
     #w = model.layers[0].mlp.proj.kernel.value
     #jax.debug.visualize_array_sharding(w)
 
