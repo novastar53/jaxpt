@@ -108,7 +108,7 @@ device rank:    {self.D}
 
         X = buf[:-1].reshape((self.D, self.B, self.T))
         Y = buf[1:].reshape((self.D, self.B, self.T))
-        return jnp.array(X), jnp.array(Y)
+        return X, Y
 
     @abstractmethod
     def _list_shards(self, label: str | None) -> list[str]:
