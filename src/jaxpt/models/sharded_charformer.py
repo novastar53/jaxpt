@@ -41,11 +41,11 @@ VOCAB_SIZE = 500
 BATCH_SIZE = 128
 BLOCK_SIZE = 1024
 
-NUM_LAYERS = 10 #30
+NUM_LAYERS = 30
 
-EMBED_DIM = 192
+EMBED_DIM = 960
 FF_DIM = EMBED_DIM * 4
-NUM_HEADS = 6
+NUM_HEADS = 15
 HEAD_DIM = EMBED_DIM // NUM_HEADS
 
 DATA_DIMS = 2
@@ -302,7 +302,7 @@ def train():
         ds = ds.batch(BATCH_SIZE)
         ds = iter(ds)
         logger.info("Starting training run...")
-        with jax.profiler.trace("/home/ubuntu/jaxpt/tensorboard"):
+        with jax.profiler.trace("/home/vikram/jaxpt/tensorboard"):
             for step in range(100):
                 last_step_time = time.time()
                 example = next(ds)
@@ -311,11 +311,11 @@ def train():
                 inputs = jax.device_put(inputs, data_sharding)
                 labels = jax.device_put(labels, data_sharding)
                 loss = step_fn(sharded_model, optimizer, inputs, labels)
-                #if step % 10 == 0:
-                #    new_time = time.time()
-                #    time_elapsed_seconds = (new_time - last_step_time)
-                #    per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
-                #    logger.info(f"step: {step}, loss: {loss}, time_elapsed: {time_elapsed_seconds:.4f}s, tflops/device/s: {per_device_tflops_per_second:.4f}")
+                if step % 10 == 0:
+                    new_time = time.time()
+                    time_elapsed_seconds = (new_time - last_step_time)
+                    per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
+                    logger.info(f"step: {step}, loss: {loss}, time_elapsed: {time_elapsed_seconds:.4f}s, tflops/device/s: {per_device_tflops_per_second:.4f}")
                 step += 1
 
         #_, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
