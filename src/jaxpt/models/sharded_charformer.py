@@ -19,19 +19,33 @@ import tensorflow_datasets as tfds
 
 from jaxpt.utils import count_params
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+import logging
 
-print(f"num devices: {jax.device_count()}")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(relativeCreated)6.0fms - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+logger.propagate = False
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+fmt = logging.Formatter("%(relativeCreated)6.0fms - %(levelname)s - %(message)s")
+handler.setFormatter(fmt)
+logger.addHandler(handler)
 
-VOCAB_SIZE = 500 # 50000
-BATCH_SIZE = 8
-BLOCK_SIZE = 2048
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
-NUM_LAYERS = 2 # 160
+logger.info(f"num devices: {jax.device_count()}")
 
-EMBED_DIM = 1024
+VOCAB_SIZE = 500
+BATCH_SIZE = 128
+BLOCK_SIZE = 1024
+
+NUM_LAYERS = 10 #30
+
+EMBED_DIM = 192
 FF_DIM = EMBED_DIM * 4
-NUM_HEADS = 8
+NUM_HEADS = 6
 HEAD_DIM = EMBED_DIM // NUM_HEADS
 
 DATA_DIMS = 2
@@ -147,7 +161,7 @@ class Attention(nnx.Module):
         v = self.v_proj(x).reshape(B, T, NUM_HEADS, HEAD_DIM)
 
         #print(pos, jnp.sum(self.key_cache.value))
-
+        
         if use_cache:
             self.key_cache.value = jax.lax.dynamic_update_index_in_dim(
                 self.key_cache.value, k, pos, 1)
@@ -164,6 +178,7 @@ class Attention(nnx.Module):
             _weights = jax.nn.softmax(_weights_unnormalized)
             #output = jnp.einsum("BHST,BTHD->BSHD", _weights, v)
             output = attention_with_masking(q, k, v, seq_pos=pos+T)
+        
 
         output = output.reshape(B, T, EMBED_DIM)
         output = self.out_proj(output)
@@ -262,52 +277,53 @@ def train():
     mesh = jax.sharding.Mesh(np.reshape(jax.devices(), (DATA_DIMS, MODEL_DIMS)),
                               ["data", "model"])
 
-    print(mesh) 
+    logger.info(f"Mesh: {mesh}") 
     data_sharding = NamedSharding(mesh, PartitionSpec("data", None))
 
 
     with mesh:
+        logger.info("Creating model...")
         sharded_model = create_sharded_model(Model, DTYPE, rngs)
 
         total_params = count_params(sharded_model)
-        print(f"Parameter Count: {total_params:,}")
+        logger.info(f"Parameter Count: {total_params:,}")
         flops = 6 * (BATCH_SIZE * BLOCK_SIZE) * total_params
-        print(f"FLOPS: {flops:,}")
+        logger.info(f"FLOPS: {flops:,}")
         flops_per_device = flops / jax.device_count()
-        print(f"FLOPS/device: {flops_per_device:,.4f}")
+        logger.info(f"FLOPS/device: {flops_per_device:,.4f}")
 
-        return sharded_model
-
-
+        logger.info("Creating optimizer...")
         tx = optax.adam(learning_rate=LEARNING_RATE)
         optimizer = nnx.Optimizer(sharded_model, tx)
 
+        logger.info("Loading dataset...")
         ds = tfds.load('lm1b', split='train', 
         shuffle_files=False)
         ds = ds.batch(BATCH_SIZE)
         ds = iter(ds)
-        for step in range(4000):
-            last_step_time = time.time()
-            example = next(ds)
-            #print(example['text'])
-            inputs, labels = prepare_train_batch(example['text'].numpy(), BLOCK_SIZE)
-            inputs = jax.device_put(inputs, data_sharding)
-            labels = jax.device_put(labels, data_sharding)
-            loss = step_fn(sharded_model, optimizer, inputs, labels)
-            if step % 10 == 0:
-                new_time = time.time()
-                time_elapsed_seconds = (new_time - last_step_time)
-                per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
-                print(f"step: {step}, loss: {loss}, time_elapsed: {time_elapsed_seconds}, tflops/device/s: {per_device_tflops_per_second}")
-            step += 1
+        logger.info("Starting training run...")
+        with jax.profiler.trace("/home/ubuntu/jaxpt/tensorboard"):
+            for step in range(100):
+                last_step_time = time.time()
+                example = next(ds)
+                #print(example['text'])
+                inputs, labels = prepare_train_batch(example['text'].numpy(), BLOCK_SIZE)
+                inputs = jax.device_put(inputs, data_sharding)
+                labels = jax.device_put(labels, data_sharding)
+                loss = step_fn(sharded_model, optimizer, inputs, labels)
+                #if step % 10 == 0:
+                #    new_time = time.time()
+                #    time_elapsed_seconds = (new_time - last_step_time)
+                #    per_device_tflops_per_second = flops_per_device * 10 / 1e12 / time_elapsed_seconds
+                #    logger.info(f"step: {step}, loss: {loss}, time_elapsed: {time_elapsed_seconds:.4f}s, tflops/device/s: {per_device_tflops_per_second:.4f}")
+                step += 1
 
-        _, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
-        ckptr = ocp.StandardCheckpointer()
-        path = Path().absolute() / "checkpoints" / "charformer_ckpt"
-        shutil.rmtree(path, ignore_errors=True)
-        ckptr.save(path, other_state)
-
-        time.sleep(5)
+        #_, _, other_state = nnx.split(sharded_model , nnx.RngState, ...)
+        #ckptr = ocp.StandardCheckpointer()
+        #path = Path().absolute() / "checkpoints" / "charformer_ckpt"
+        #shutil.rmtree(path, ignore_errors=True)
+        #ckptr.save(path, other_state)
+        #time.sleep(5)
 
         return sharded_model
 
@@ -324,20 +340,19 @@ def infer(model):
     len_text = len(text[0])
     x, _ = prepare_train_batch(text, len_text)
     preds = _pred(model, x, 0, True)
-    print(chr(preds[0,-1]))
+    logger.info(chr(preds[0,-1]))
     pos = len_text
     for idx in range(20):
         x = preds[:, -1][..., None]
         #x = jnp.concatenate((x, preds[:, -1][..., None]), axis=-1)
         #print(x)
         preds = _pred(model, x, pos, True)
-        print(chr(preds[0,-1]))
+        logger.info(chr(preds[0,-1]))
         pos += 1
     
 
 if __name__ == "__main__":
-    with jax.profiler.trace("/tmp/tensorboard"):
-        model = train()
+    model = train()
     #w = model.layers[0].mlp.proj.kernel.value
     #jax.debug.visualize_array_sharding(w)
 
