@@ -15,6 +15,7 @@ from jaxpt.modules.position import (
     RoPE_Llama,
     RoPE_Classic,
 )
+from jaxpt.utils import create_sharded_model
 
 
 @dataclass(eq=True, unsafe_hash=True)
@@ -138,11 +139,15 @@ class SmolLM(nnx.Module):
         return model
 
 
-def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs) -> SmolLM:
-    m = SmolLM(config, rngs)
+def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs, sharded=False) -> SmolLM:
+    if sharded:
+        m = SmolLM(config, rngs)
+    else:
+        m = create_sharded_model(SmolLM, config, rngs)
+
     graphdef, flax_params, other_state = nnx.split(m, nnx.Param, ...)
 
-    hf_m = load_hf_pretrained()
+    hf_m = load_hf_pretrained(model_name=config.name)
     state = hf_m.state_dict()
 
     flax_params.wte.embedding.value = jnp.array(
@@ -204,11 +209,10 @@ def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs) -> SmolLM:
     return m
 
 
-def load_hf_pretrained():
+def load_hf_pretrained(model_name="HuggingFaceTB/SmolLM-135M"):
     from transformers import AutoModelForCausalLM
 
-    model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
-
+    model = AutoModelForCausalLM.from_pretrained(model_name)
     return model
 
 
