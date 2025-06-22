@@ -6,39 +6,10 @@ import jax.numpy as jnp
 
 from jaxpt.modules.config import Config
 
+
 class MOE(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
-        self.c_fc = nnx.Linear(
-            config.n_embed,
-            config.n_mlp_hidden * config.n_experts,
-            kernel_init=nnx.with_partitioning(
-                nnx.initializers.normal(stddev=0.02),(None, "model")),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model")),
-            use_bias=config.mlp_bias,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        self.c_proj = nnx.Linear(
-            config.n_mlp_hidden * config.n_experts,
-            config.n_embed,
-            kernel_init=nnx.with_partitioning(nnx.initializers.normal(
-                stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ),(None, "model")),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
-            use_bias=config.mlp_bias,
-            dtype=config.dtype,
-            rngs=rngs,
-        )
-        match config.glu_activation:
-            case "sigmoid":
-                self.activation = nnx.sigmoid
-            case "gelu":
-                self.activation = partial(nnx.gelu, approximate=True)
-            case "swish" | "silu":
-                self.activation = nnx.silu
-            case _:
-                self.activation = nnx.sigmoid
-
+        self.experts = [ GLU(config, rngs) for _ in config.n_experts ]
         self.router_gate = nnx.Linear(
             config.n_embed, 
             config.n_experts, 
@@ -53,9 +24,6 @@ class MOE(nnx.Module):
     
     def __call__(self, x):
         B, T, C = x.shape
-        H = self.config.n_mlp_hidden
-        nE = self.config.n_experts
-        K = self.config.n_top_k_experts
 
         router_logits = self.router_gate(x) # B x T x nE
         router_probs = nnx.softmax(router_logits, axis=-1) # B x T x nE
@@ -63,7 +31,6 @@ class MOE(nnx.Module):
         router_top_k_total_probs = jnp.sum(router_top_k_probs, axis=-1)
         router_top_k_probs /= router_top_k_total_probs[..., None]
 
-        c_fc_kernel = self.c_fc.kernel.reshape(C, H, nE) # (C x H x nE)
         c_fc_top_k = jnp.take(c_fc_kernel, router_top_k_indices, axis=-1)
         h = jnp.einsum("btc,chbtk->bthk", x, c_fc_top_k) # (B, T, H, K)
 
@@ -105,9 +72,9 @@ class GLU(nnx.Module):
             config.n_embed,
             kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ), (None, "model")),
+            ), ("model", None)),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, ("model",)),
+                nnx.initializers.zeros, (None,)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -150,9 +117,9 @@ class MLP(nnx.Module):
             config.n_embed,
             kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ), (None, "model")),
+            ), ("model", None)),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, ("model",)),
+                nnx.initializers.zeros, (None,)),
             dtype=config.dtype,
             rngs=rngs,
         )
