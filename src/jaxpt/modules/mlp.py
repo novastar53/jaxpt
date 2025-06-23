@@ -20,6 +20,7 @@ class MOE(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
+        self.top_k = self.config.n_top_k_experts
         self.config = config
 
 
