@@ -34,6 +34,7 @@ class GLaM_Config(Config):
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
+    glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
     )

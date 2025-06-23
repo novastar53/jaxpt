@@ -9,7 +9,7 @@ from jaxpt.modules.config import Config
 
 class MOE(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
-        self.experts = [ GLU(config, rngs) for _ in config.n_experts ]
+        self.experts = [ GLU(config, rngs) for _ in range(config.n_experts) ]
         self.router_gate = nnx.Linear(
             config.n_embed, 
             config.n_experts, 
@@ -23,7 +23,7 @@ class MOE(nnx.Module):
         self.config = config
 
 
-     def __call__(self, x):
+    def __call__(self, x):
         expert_weights, expert_indices = self.router_gate(x) # obtain the expert indices and weights for each token
         final_output = jnp.zeros_like(x) # create a zero array for the final combined output from the top_k experts
 
