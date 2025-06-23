@@ -24,8 +24,14 @@ class MOE(nnx.Module):
 
 
     def __call__(self, x):
-        expert_weights, expert_indices = self.router_gate(x) # obtain the expert indices and weights for each token
-        final_output = jnp.zeros_like(x) # create a zero array for the final combined output from the top_k experts
+        logits = self.router_gate(x)
+        top_k_logits, expert_indices = jax.lax.top_k(logits, self.top_k)
+        zeros = jnp.full_like(logits, float('-inf'))
+        sparse_logits = jnp.put_along_axis(
+            zeros, expert_indices, top_k_logits, axis=-1, inplace=False)
+        expert_weights = jax.nn.softmax(sparse_logits, axis=-1)
+
+        final_output = jnp.zeros_like(x) 
 
         # Reshape inputs for batch processing
         flat_x = x.reshape(-1, x.shape[-1]) # flatten the batch and sequence dimensions (why?) 
