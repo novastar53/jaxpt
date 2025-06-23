@@ -23,7 +23,7 @@ class MOE(nnx.Module):
         self.config = config
 
 
-     def __call__(self, x, key):
+     def __call__(self, x):
         expert_weights, expert_indices = self.router_gate(x) # obtain the expert indices and weights for each token
         final_output = jnp.zeros_like(x) # create a zero array for the final combined output from the top_k experts
 
