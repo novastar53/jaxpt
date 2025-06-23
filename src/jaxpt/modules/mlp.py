@@ -21,26 +21,37 @@ class MOE(nnx.Module):
             rngs=rngs,
         )
         self.config = config
-    
-    def __call__(self, x):
-        B, T, C = x.shape
 
-        router_logits = self.router_gate(x) # B x T x nE
-        router_probs = nnx.softmax(router_logits, axis=-1) # B x T x nE
-        router_top_k_probs, router_top_k_indices  = jax.lax.top_k(router_probs, K)
-        router_top_k_total_probs = jnp.sum(router_top_k_probs, axis=-1)
-        router_top_k_probs /= router_top_k_total_probs[..., None]
 
-        c_fc_top_k = jnp.take(c_fc_kernel, router_top_k_indices, axis=-1)
-        h = jnp.einsum("btc,chbtk->bthk", x, c_fc_top_k) # (B, T, H, K)
+     def __call__(self, x, key):
+        expert_weights, expert_indices = self.router_gate(x) # obtain the expert indices and weights for each token
+        final_output = jnp.zeros_like(x) # create a zero array for the final combined output from the top_k experts
 
-        h = nnx.gelu(h, approximate=True)
+        # Reshape inputs for batch processing
+        flat_x = x.reshape(-1, x.shape[-1]) # flatten the batch and sequence dimensions (why?) 
+        flat_expert_weights = expert_weights.reshape(-1, expert_weights.shape[-1]) # flatten the expert weights
 
-        c_proj_kernel = self.c_proj.kernel.reshape(H, C, nE)
-        c_proj_top_k = jnp.take(c_proj_kernel, router_top_k_indices, axis=-1)
-        o = jnp.einsum("bthk,hcbtk->btck", h, c_proj_top_k)
-        o = jnp.einsum("btck,btk->btc", o, router_top_k_probs) # weighted sum of experts
-        return o
+        # This for loop will be unrolled during lowering.
+        # Since the number of experts is fixed, it's a constant time operation.
+        for i, expert in enumerate(self.experts):
+            # Create a mask for the inputs where the current expert is in top-k
+            expert_mask = (expert_indices == i).any(axis=-1)
+            flat_mask = expert_mask.reshape(-1)
+
+            idxs = jnp.nonzero(flat_mask, size=flat_mask.size)[0]   # shape (n_trues,)
+
+            expert_input = flat_x[flat_mask]
+            expert_output = expert(expert_input)
+
+            # Extract and apply gating scores
+            gating_scores = flat_expert_weights[flat_mask, i]
+            gating_scores = gating_scores[..., None]
+            weighted_output = expert_output * gating_scores
+
+            # Update final output additively by indexing and adding
+            final_output = final_output.at[expert_mask].set(weighted_output)
+
+        return final_output
 
 
 class GLU(nnx.Module):

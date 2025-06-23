@@ -25,7 +25,7 @@ class GLaM_Config(Config):
     vocab_size: int = 50304 # 50257 padded to the nearest multiple of 64
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
-    n_kv_head: int = 12  # number of key-value heads
+    n_kv_head: int = 4  # number of key-value heads
     n_embed: int = 768  # number token embedding dimensionsa
     n_experts: int = 64  # number of experts
     n_top_k_experts: int = 2  # number of top experts to use
@@ -33,9 +33,6 @@ class GLaM_Config(Config):
     n_mlp_hidden: int = 3072  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
-    glu_activation: Literal["gelu", "silu", "sigmoid"] = (
-        "silu"  # glu activation or gating function
-    )
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
