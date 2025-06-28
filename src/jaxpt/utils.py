@@ -25,7 +25,7 @@ def create_sharded_model(Model, config, rngs):
     model = Model(config=config, rngs=rngs)
     state = nnx.state(model)
     pspecs = nnx.get_partition_spec(state)
-    sharded_state = jax.lax.with_sharding_constraint(state, pspecs)
+    sharded_state = nnx.with_sharding_constraint(state, pspecs)
     nnx.update(model, sharded_state)
     return model
 

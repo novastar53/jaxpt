@@ -18,8 +18,8 @@ from jaxpt.modules.position import (
 
 
 @dataclass(eq=True, unsafe_hash=True)
-class GLaM_Config(Config):
-    name: str = "GLaM"
+class Tiny_MoE_Config(Config):
+    name: str = "Tiny_MoE"
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304 # 50257 padded to the nearest multiple of 64
@@ -28,6 +28,7 @@ class GLaM_Config(Config):
     n_kv_head: int = 4  # number of key-value heads
     n_embed: int = 768  # number token embedding dimensionsa
     n_experts: int = 64  # number of experts
+    mesh: jax.sharding.Mesh = None # device mesh
     n_top_k_experts: int = 2  # number of top experts to use
     aux_loss_coeff: float = 1e-2 # moe auxiliary loss coefficient
     n_mlp_hidden: int = 3072  # number of hidden dimensions
@@ -46,7 +47,7 @@ class GLaM_Config(Config):
 
 class GLU_Block(nnx.Module):
     def __init__(
-        self, config: GLaM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+        self, config: Tiny_MoE_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
     ) -> None:
         self.rms_n_1 = nnx.RMSNorm(
             config.n_embed,
@@ -61,17 +62,17 @@ class GLU_Block(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.mlp = GLU(config, rngs)
+        self.glu = GLU(config, rngs)
 
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
-        x = self.mlp(self.rms_n_2(x)) + x
+        x = self.glu(self.rms_n_2(x)) + x
         return x
 
 
 class MOE_Block(nnx.Module):
     def __init__(
-        self, config: GLaM_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+        self, config: Tiny_MoE_Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
     ) -> None:
         self.rms_n_1 = nnx.RMSNorm(
             config.n_embed,
@@ -86,16 +87,16 @@ class MOE_Block(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.mlp = MOE(config, rngs)
+        self.moe = MOE(config, rngs)
 
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
-        x = self.mlp(self.rms_n_2(x)) + x
+        x = self.moe(self.rms_n_2(x)) + x
         return x
 
 
-class GLaM(nnx.Module):
-    def __init__(self, config: GLaM_Config, rngs: nnx.Rngs):
+class Tiny_MoE(nnx.Module):
+    def __init__(self, config: Tiny_MoE_Config, rngs: nnx.Rngs):
         self.config = config
         self.wte = nnx.Embed(
             config.vocab_size,
@@ -143,11 +144,11 @@ class GLaM(nnx.Module):
 
     @staticmethod
     def from_checkpoint(
-        fpath: str, rngs: nnx.Rngs, config: Optional[GLaM_Config]
+        fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config]
     ):
-        config = config if config else GLaM_Config()
-        model = GLaM(config=config, rngs=rngs)
-        abstract_model = nnx.eval_shape(lambda: GLaM(config=config, rngs=rngs))
+        config = config if config else Tiny_MoE_Config()
+        model = Tiny_MoE(config=config, rngs=rngs)
+        abstract_model = nnx.eval_shape(lambda: Tiny_MoE(config=config, rngs=rngs))
         graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)

@@ -10,9 +10,9 @@ from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
-from .glam import (
-    GLaM, 
-    GLaM_Config
+from .tiny_moe import (
+    Tiny_MoE, 
+    Tiny_MoE_Config
 )
 from .smol_lm import (
     SmolLM, 
@@ -33,7 +33,7 @@ __all__ = [
     "RoPE_GPT",
     "SmolLM",
     "SmolLM_Config",
-    "GLaM",
-    "GLaM_Config",
+    "Tiny_MoE",
+    "Tiny_Moe_Config",
     "from_huggingface_pretrained",
 ]
