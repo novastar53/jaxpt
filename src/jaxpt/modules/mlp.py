@@ -9,13 +9,13 @@ from jaxpt.modules.config import Config
 
 class MOE(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
-        self.experts = [ GLU(config, rngs) for _ in range(config.n_experts) ]
+        self.experts = [ GLU(config, rngs, ) for _ in range(config.n_experts) ]
         self.router_gate = nnx.Linear(
             config.n_embed, 
             config.n_experts, 
             kernel_init=nnx.with_partitioning(nnx.initializers.normal(
-                stddev=0.02), (None, "model")),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
+                stddev=0.02), (None,)),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, (None,)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -51,7 +51,7 @@ class MOE(nnx.Module):
             expert_output = expert(expert_input)
 
             # Extract and apply gating scores
-            gating_scores = flat_expert_weights[flat_mask, i]
+            gating_scores = flat_expert_weights[flat_mask, i] # TODO: this doesn't work with jax jit because the array dimensions are not static
             gating_scores = gating_scores[..., None]
             weighted_output = expert_output * gating_scores
 
@@ -62,14 +62,18 @@ class MOE(nnx.Module):
 
 
 class GLU(nnx.Module):
+
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.c_fc = nnx.Linear(
             config.n_embed,
             config.n_mlp_hidden,
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=0.02),
-                (None, "model")),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model,")),
+                sharding=(None, "model"),
+                mesh=config.mesh),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, 
+            sharding=("model,"),
+            mesh=config.mesh),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -79,8 +83,11 @@ class GLU(nnx.Module):
             config.n_mlp_hidden,
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=0.02),
-                (None, "model")),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, ("model",)),
+                sharding=(None, "model"),
+                mesh=config.mesh),
+            bias_init=nnx.with_partitioning(nnx.initializers.zeros, 
+            sharding=("model",),
+            mesh=config.mesh),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -90,9 +97,10 @@ class GLU(nnx.Module):
             config.n_embed,
             kernel_init=nnx.with_partitioning(nnx.initializers.normal(
                 stddev=0.02 * (2 * config.n_layer) ** -0.5
-            ), ("model", None)),
+            ), sharding=("model", None), mesh=config.mesh),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, (None,)),
+                nnx.initializers.zeros, sharding=(None,),
+                mesh=config.mesh),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
             rngs=rngs,
