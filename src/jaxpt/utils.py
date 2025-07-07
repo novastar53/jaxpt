@@ -6,6 +6,7 @@ from flax import nnx
 
 # Logging
 
+
 def append_to_csv(file_path, row):
     """
     Appends a single row to a CSV file.
@@ -19,6 +20,7 @@ def append_to_csv(file_path, row):
 
 
 # Model Loaders
+
 
 @nnx.jit(static_argnums=(0, 1))
 def create_sharded_model(Model, config, rngs):

@@ -10,14 +10,8 @@ from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
 )
-from .tiny_moe import (
-    Tiny_MoE, 
-    Tiny_MoE_Config
-)
-from .smol_lm import (
-    SmolLM, 
-    SmolLM_Config
-)
+from .tiny_moe import Tiny_MoE, Tiny_MoE_Config
+from .smol_lm import SmolLM, SmolLM_Config
 
 __all__ = [
     "Bigram",

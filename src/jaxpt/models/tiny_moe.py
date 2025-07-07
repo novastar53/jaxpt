@@ -21,17 +21,18 @@ from jaxpt.modules.position import (
 class Tiny_MoE_Config(Config):
     name: str = "Tiny_MoE"
     dtype: jnp.dtype = jnp.float32
-    block_size: int = 1024  # sequence length
-    vocab_size: int = 50304 # 50257 padded to the nearest multiple of 64
-    n_layer: int = 12  # number of attention blocks
+    block_size: int = 2048  # sequence length
+    vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
+    n_layer: int = 32  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_kv_head: int = 4  # number of key-value heads
-    n_embed: int = 768  # number token embedding dimensionsa
-    n_experts: int = 64  # number of experts
-    mesh: jax.sharding.Mesh = None # device mesh
-    n_top_k_experts: int = 2  # number of top experts to use
-    aux_loss_coeff: float = 1e-2 # moe auxiliary loss coefficient
-    n_mlp_hidden: int = 3072  # number of hidden dimensions
+    n_embed: int = 576  # number token embedding dimensionsa
+    n_experts: int = 8  # number of experts
+    mesh: jax.sharding.Mesh = None  # device mesh
+    top_k: int = 2  # number of top experts to use
+    load_factor = 1.00 # load factor for expert buffers
+    aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
+    n_mlp_hidden: int = 1728  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
@@ -43,6 +44,28 @@ class Tiny_MoE_Config(Config):
     init_stddev: float = 0.02  # stddev for layer init
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
+
+    mlp_fc_kernel_sharding: tuple = (None,)
+    mlp_fc_bias_sharding: tuple = (None,)
+    mlp_proj_kernel_sharding: tuple = (None,)
+    mlp_proj_bias_sharding: tuple = (None,)
+    glu_fc_kernel_sharding: tuple = (None,)
+    glu_fc_bias_sharding: tuple = (None,)
+    glu_gate_kernel_sharding: tuple = (None,)
+    glu_gate_bias_sharding: tuple = (None,)
+    glu_proj_kernel_sharding: tuple = (None,)
+    glu_proj_bias_sharding: tuple = (None,)
+
+    attn_c_attn_kernel_sharding: tuple = (None,)
+    attn_c_attn_bias_sharding: tuple = (None,)
+    attn_c_proj_kernel_sharding: tuple = (None,)
+    attn_c_proj_bias_sharding: tuple = (None,)
+    attn_wq_kernel_sharding: tuple = (None,)
+    attn_wq_bias_sharding: tuple = (None,)
+    attn_wkv_kernel_sharding: tuple = (None,)
+    attn_wkv_bias_sharding: tuple = (None,)
+    attn_wproj_kernel_sharding: tuple = (None,)
+    attn_wproj_bias_sharding: tuple = (None,)
 
 
 class GLU_Block(nnx.Module):
@@ -103,7 +126,8 @@ class Tiny_MoE(nnx.Module):
             config.n_embed,
             embedding_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev),
-                (None, "model")),
+                (None,) 
+            ),
             rngs=rngs,
         )
 
@@ -116,7 +140,7 @@ class Tiny_MoE(nnx.Module):
             config.dtype,
         )
         self.h = []
-        for _ in range(config.n_layer//2):
+        for _ in range(config.n_layer // 2):
             self.h += [
                 MOE_Block(config, rope_omega=omega, rngs=rngs),
                 GLU_Block(config, rope_omega=omega, rngs=rngs),
@@ -148,10 +172,13 @@ class Tiny_MoE(nnx.Module):
     ):
         config = config if config else Tiny_MoE_Config()
         model = Tiny_MoE(config=config, rngs=rngs)
-        abstract_model = nnx.eval_shape(lambda: Tiny_MoE(config=config, rngs=rngs))
-        graphdef, rngstate, other_state = nnx.split(abstract_model, nnx.RngState, ...)
+        abstract_model = nnx.eval_shape(
+            lambda: Tiny_MoE(config=config, rngs=rngs)
+        )
+        graphdef, rngstate, other_state = nnx.split(
+            abstract_model, nnx.RngState, ...
+        )
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
         model = nnx.merge(graphdef, rngstate, other_state)
         return model
-

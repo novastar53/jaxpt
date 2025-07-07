@@ -52,8 +52,7 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros,
-                ("model",)
+                nnx.initializers.zeros, ("model",)
             ),
             dtype=config.dtype,
             rngs=rngs,
@@ -63,8 +62,7 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros,
-                ("model",)
+                nnx.initializers.zeros, ("model",)
             ),
             dtype=config.dtype,
             rngs=rngs,
@@ -85,7 +83,8 @@ class SmolLM(nnx.Module):
             config.n_embed,
             embedding_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev),
-                (None, "model")),
+                (None, "model"),
+            ),
             rngs=rngs,
         )
 
@@ -105,10 +104,7 @@ class SmolLM(nnx.Module):
         self.rms_n_f = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
-            scale_init=nnx.with_partitioning(
-                nnx.initializers.ones,
-                ("model",)
-            ),
+            scale_init=nnx.with_partitioning(nnx.initializers.ones, ("model",)),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -139,7 +135,9 @@ class SmolLM(nnx.Module):
         return model
 
 
-def from_hf_pretrained(config: SmolLM_Config, rngs: nnx.Rngs, sharded=False) -> SmolLM:
+def from_hf_pretrained(
+    config: SmolLM_Config, rngs: nnx.Rngs, sharded=False
+) -> SmolLM:
     if sharded:
         m = SmolLM(config, rngs)
     else:
