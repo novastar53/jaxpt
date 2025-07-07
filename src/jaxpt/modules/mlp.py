@@ -198,10 +198,9 @@ class GLU(nnx.Module):
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=0.02),
                 sharding=fc_kernel_sharding,
-                mesh=config.mesh,
             ),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, sharding=fc_bias_sharding, mesh=config.mesh
+                nnx.initializers.zeros, sharding=fc_bias_sharding, 
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
@@ -213,10 +212,9 @@ class GLU(nnx.Module):
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=0.02),
                 sharding=gate_kernel_sharding,
-                mesh=config.mesh,
             ),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, sharding=gate_bias_sharding, mesh=config.mesh
+                nnx.initializers.zeros, sharding=gate_bias_sharding, 
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
@@ -230,10 +228,9 @@ class GLU(nnx.Module):
                     stddev=0.02 * (2 * config.n_layer) ** -0.5
                 ),
                 sharding=proj_kernel_sharding,
-                mesh=config.mesh,
             ),
             bias_init=nnx.with_partitioning(
-                nnx.initializers.zeros, sharding=proj_bias_sharding, mesh=config.mesh
+                nnx.initializers.zeros, sharding=proj_bias_sharding, 
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,

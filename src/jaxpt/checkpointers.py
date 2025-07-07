@@ -5,10 +5,7 @@ from google.cloud import storage
 
 def save_checkpoint(m, output_dir, run_dirname, step):
     checkpoint_dirpath = (
-        output_dir
-        / m.config.name
-        / "checkpoints"
-        / run_dirname
+        output_dir / m.config.name / "checkpoints" / run_dirname
     )
     checkpoint_dirpath.mkdir(parents=True, exist_ok=True)
     m.save_checkpoint(checkpoint_dirpath / f"checkpoint-{step}.pt")

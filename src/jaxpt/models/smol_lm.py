@@ -43,6 +43,30 @@ class SmolLM_Config(Config):
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
 
+    mesh: jax.sharding.Mesh = None  # device mesh
+    mlp_fc_kernel_sharding: tuple = (None,)
+    mlp_fc_bias_sharding: tuple = (None,)
+    mlp_proj_kernel_sharding: tuple = (None,)
+    mlp_proj_bias_sharding: tuple = (None,)
+
+    glu_fc_kernel_sharding: tuple = (None,)
+    glu_fc_bias_sharding: tuple = (None,)
+    glu_gate_kernel_sharding: tuple = (None,)
+    glu_gate_bias_sharding: tuple = (None,)
+    glu_proj_kernel_sharding: tuple = (None,)
+    glu_proj_bias_sharding: tuple = (None,)
+
+    attn_wq_kernel_sharding: tuple = (None,)
+    attn_wq_bias_sharding: tuple = (None,)
+    attn_wkv_kernel_sharding: tuple = (None,)
+    attn_wkv_bias_sharding: tuple = (None,)
+    attn_wproj_kernel_sharding: tuple = (None,)
+    attn_wproj_bias_sharding: tuple = (None,)
+
+    wte_embedding_sharding: tuple = (None,)
+    rms_n_1_sharding: tuple = (None,)
+    rms_n_2_sharding: tuple = (None,)
+    rms_n_f_sharding: tuple = (None,)
 
 class Block(nnx.Module):
     def __init__(
@@ -52,7 +76,8 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros, ("model",)
+                nnx.initializers.zeros,
+                getattr(config, "rms_n_1_sharding", ("model",)),
             ),
             dtype=config.dtype,
             rngs=rngs,
@@ -62,7 +87,8 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros, ("model",)
+                nnx.initializers.zeros,
+                getattr(config, "rms_n_2_sharding", ("model",)),
             ),
             dtype=config.dtype,
             rngs=rngs,
@@ -83,7 +109,7 @@ class SmolLM(nnx.Module):
             config.n_embed,
             embedding_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev),
-                (None, "model"),
+                getattr(config, "wte_embedding_sharding", (None, "model")),
             ),
             rngs=rngs,
         )
@@ -104,7 +130,10 @@ class SmolLM(nnx.Module):
         self.rms_n_f = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
-            scale_init=nnx.with_partitioning(nnx.initializers.ones, ("model",)),
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rms_n_f_sharding", ("model",)),
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )

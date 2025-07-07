@@ -69,17 +69,17 @@ class SelfAttentionBase(nnx.Module, abc.ABC):
 
 class CausalSelfAttention(SelfAttentionBase):
     def __init__(self, config: Config, rngs: nnx.Rngs):
-        c_attn_kernel_sharding = getattr(config, "attn_c_attn_kernel_sharding", (None, "model"))
-        c_attn_bias_sharding = getattr(config, "attn_c_attn_bias_sharding", ("model",))
-        c_proj_kernel_sharding = getattr(config, "attn_c_proj_kernel_sharding", (None, "model"))
-        c_proj_bias_sharding = getattr(config, "attn_c_proj_bias_sharding", ("model",))
         self.c_attn = nnx.Linear(
             config.n_embed,
             3 * config.n_embed,
             kernel_init=nnx.with_partitioning(
-                nnx.initializers.normal(stddev=0.02), c_attn_kernel_sharding
+                nnx.initializers.normal(stddev=0.02),
+                getattr(config, "attn_c_attn_kernel_sharding", (None, "model")),
             ),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, c_attn_bias_sharding),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_c_attn_bias_sharding", ("model",)),
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -90,9 +90,12 @@ class CausalSelfAttention(SelfAttentionBase):
                 nnx.initializers.normal(
                     stddev=0.02 * (2 * config.n_layer) ** -0.5
                 ),
-                c_proj_kernel_sharding,
+                getattr(config, "attn_c_proj_kernel_sharding", (None, "model")),
             ),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, c_proj_bias_sharding),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_c_proj_bias_sharding", ("model",)),
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -141,20 +144,17 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
 
         self.config = config
 
-        wq_kernel_sharding = getattr(config, "attn_wq_kernel_sharding", (None, "model"))
-        wq_bias_sharding = getattr(config, "attn_wq_bias_sharding", ("model",))
-        wkv_kernel_sharding = getattr(config, "attn_wkv_kernel_sharding", (None, "model"))
-        wkv_bias_sharding = getattr(config, "attn_wkv_bias_sharding", ("model",))
-        wproj_kernel_sharding = getattr(config, "attn_wproj_kernel_sharding", (None, "model"))
-        wproj_bias_sharding = getattr(config, "attn_wproj_bias_sharding", ("model",))
         self.wq = nnx.Linear(
             config.n_embed,
             config.n_embed,
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev),
-                wq_kernel_sharding,
+                getattr(config, "attn_wq_kernel_sharding", (None, "model")),
             ),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, wq_bias_sharding),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_wq_bias_sharding", ("model",)),
+            ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -164,9 +164,12 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
             2 * config.n_kv_head * config.n_embed // config.n_head,
             kernel_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev),
-                wkv_kernel_sharding,
+                getattr(config, "attn_wkv_kernel_sharding", (None, "model")),
             ),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, wkv_bias_sharding),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_wkv_bias_sharding", ("model",)),
+            ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,
@@ -178,9 +181,12 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
                 nnx.initializers.normal(
                     stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
                 ),
-                wproj_kernel_sharding,
+                getattr(config, "attn_wproj_kernel_sharding", (None, "model")),
             ),
-            bias_init=nnx.with_partitioning(nnx.initializers.zeros, wproj_bias_sharding),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_wproj_bias_sharding", ("model",)),
+            ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
             rngs=rngs,

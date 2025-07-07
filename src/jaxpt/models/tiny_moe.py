@@ -49,6 +49,7 @@ class Tiny_MoE_Config(Config):
     mlp_fc_bias_sharding: tuple = (None,)
     mlp_proj_kernel_sharding: tuple = (None,)
     mlp_proj_bias_sharding: tuple = (None,)
+
     glu_fc_kernel_sharding: tuple = (None,)
     glu_fc_bias_sharding: tuple = (None,)
     glu_gate_kernel_sharding: tuple = (None,)

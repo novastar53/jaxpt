@@ -74,7 +74,7 @@ def generate_completions(
     model,
     enc=None,
     prefix="Hello, I'm a language model,",
-    num_completions=5,
+    num_completions=8,
     max_length=20,
     key=None,
 ):
