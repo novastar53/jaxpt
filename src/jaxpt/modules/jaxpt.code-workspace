@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../high_performance_jax"
+		}
+	],
+	"settings": {
+		"makefile.configureOnOpen": false
+	}
+}

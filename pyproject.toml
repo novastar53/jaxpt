@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = "==3.12.8"
 dependencies = [
     "datasets>=3.3.2",
+    "debugpy>=1.8.14",
     "flash-attention-jax>=0.3.1",
     "flax==0.10.4",
     "google-cloud-storage>=3.1.0",
