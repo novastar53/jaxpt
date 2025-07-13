@@ -1,91 +1,34 @@
-from typing import Literal
-
-import os
-
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=2'
-
-import jax
-
-platform : Literal["darwin", "colab", "cuda", "tpu"] = "darwin"
-
-from pathlib import Path
-import sys
-
-jaxpt_dir = str(Path().absolute().parent / "src" )
-
-sys.path.append(jaxpt_dir)
-print(jaxpt_dir)
-from functools import partial
-from dataclasses import dataclass
-import random
-
 import jax
 import jax.numpy as jnp
-from jax.sharding import PartitionSpec, NamedSharding, Mesh
-from jax.debug import visualize_array_sharding as viz
-
 import flax.nnx as nnx
-import optax
+from jax.sharding import PartitionSpec
 
 from jaxpt.modules.config import Config
-#from jaxpt.utils import create_sharded_model
 
 
-devices = jax.devices()
-print(devices)
-
-mesh = Mesh(devices, ("devices"))
 spec = PartitionSpec("devices",)
-sharding = NamedSharding(mesh, spec)
-
-@nnx.jit(static_argnums=(0, 1)) #, out_shardings=sharding)
-def create_sharded_model(Model, config, rngs):
-    model = Model(config=config, rngs=rngs)
-    graphdef, state = nnx.split(model)
-    pspecs = nnx.get_partition_spec(state)
-    sharded_state = nnx.with_sharding_constraint(
-        state, pspecs, mesh=config.mesh
-        )
-    nnx.update(model, sharded_state)
-    return model
-
-
-
-@dataclass(unsafe_hash=True)
-class MOE_Config(Config):
-    n_layer = 1
-    top_k = 2
-    load_factor = 1.00
-    n_experts = len(devices)
-    n_embed = 3 
-    n_mlp_hidden = 6
-    mlp_bias = True
-    dtype = jax.numpy.float32
-    mesh = mesh
-
-config = MOE_Config()
 
 
 class Experts(nnx.Module):
     def __init__(self, config, rngs):
         w_c_fc_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02),
-            sharding=("devices",))
+            sharding=spec)
         
         b_init = nnx.with_partitioning(
             nnx.initializers.zeros,
-            sharding=("devices",))
+            sharding=spec)
         
         w_c_proj_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
-            sharding=("devices",)
+            sharding=spec
         )
 
         self.w_c_fc = nnx.Param(w_c_fc_init(rngs.default(),
             (
                 config.n_experts,
                 config.n_embed,
-                config.n_embed
+                config.n_mlp_hidden
             )
         ))
         self.b_c_fc = nnx.Param(b_init(rngs.default(),
@@ -130,13 +73,12 @@ class Experts(nnx.Module):
 
     def __call__(self, x):
         x = jax.lax.with_sharding_constraint(x, spec)
-        o = jnp.einsum('eti,eio->eto', x, self.w_c_fc)
-        #o = x @ self.w_c_fc
-        #h = jnp.einsum('eti,eih->eth', x, self.w_c_fc) + self.b_c_fc
-        #g = jnp.einsum('eti,eih->eth', x, self.w_gate) + self.b_gate
-        #g = nnx.silu(g)
+        h = jnp.einsum('eti,eih->eth', x, self.w_c_fc) + self.b_c_fc
+        g = jnp.einsum('eti,eih->eth', x, self.w_gate) + self.b_gate
+        g = nnx.silu(g)
         #og = jnp.einsum('eth,eth->eth', h, g)
-        #o = jnp.einsum('eth,eho->eto', og, self.w_c_proj) + self.b_c_proj
+        og = h * g
+        o = jnp.einsum('eth,eho->eto', og, self.w_c_proj) + self.b_c_proj
         o = jax.lax.with_sharding_constraint(o, spec)
         return o
 
@@ -161,7 +103,8 @@ class MOE(nnx.Module):
         self.load_factor = config.load_factor
         self.add_noise = False
         self.rngs = rngs
-    
+
+
     def _get_expert_inputs(self, x, logits):
         T, _ = logits.shape
         _, C = x.shape
@@ -235,63 +178,5 @@ class MOE(nnx.Module):
 
         y_pred = jnp.einsum("BTKC,BTK->BTC", expert_outputs, top_k_probs)       
         y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
-        return y_pred, 0, (top_k_probs,)
+        return y_pred
 
-def loss_fn(model, x, y):
-    y_pred, aux_loss, debug_outputs = model(x)
-    loss = jnp.mean((y - y_pred)**2) + 0.01 * aux_loss
-    return loss, debug_outputs
-
-@nnx.jit
-def step(state, x, y):
-    (loss, debug_outputs), grads = nnx.value_and_grad(loss_fn, has_aux=True)(state.model, x, y)
-    state.update(grads)
-    return loss, grads, debug_outputs
-
-
-from time import time
-
-if __name__ == "__main__":
-    with mesh:
-        D, B, T, C = 1000, len(devices), 5, config.n_embed
-
-        default = jax.random.key(69)
-        gate_noise = jax.random.key(42)
-        rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
-        model = create_sharded_model(MOE, config, rngs)
-        model.train(add_noise=True)
-        tx = optax.adam(1e-2)
-        state = nnx.Optimizer(model, tx)
-
-        x = jax.random.normal(jax.random.key(1000), (D * B * T, C))
-
-        expert_ids = (x[:, 0] > 0).astype(jnp.int32)
-        t = [
-            jax.random.normal(jax.random.key(2000), (C, C)),
-            jax.random.normal(jax.random.key(3000), (C, C)),
-        ]
-        def transform(xi, eid):
-            return jnp.where(eid == 1, xi @ t[0], xi @ t[1])
-
-        y = jax.vmap(lambda xi, ei: transform(xi, ei))(x, expert_ids)
-
-        x = x.reshape(D, B, T, C)
-        y = y.reshape(D, B, T, C)
-
-        indices = list(range(D))
-
-        @nnx.jit
-        def run_model(x):
-            return model(x)
-        #with jax.profiler.trace("./tensorboard"):
-        for e in range(100):
-            for i in indices:
-                start = time()
-                x_i = jax.device_put(x[i], sharding)
-                y_i = jax.device_put(y[i], sharding)
-                loss, grads, debug_outputs = step(state, x_i, y_i)
-                top_k_probs, = debug_outputs
-                if i % 1000 == 0:
-                    end = time()
-                    iter_time = 1024 * (end - start) / 1000
-                    print(f"{e=}, {i=}, {loss.item()=}, {iter_time=:0.4f}")

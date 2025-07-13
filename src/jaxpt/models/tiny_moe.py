@@ -8,7 +8,8 @@ import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
 from jaxpt.modules.attention import GQ_Attention
-from jaxpt.modules.mlp import GLU, MLP, MOE
+from jaxpt.modules.mlp import GLU, MLP
+from jaxpt.modules.moe import MOE
 from jaxpt.modules.position import (
     calc_rope_omega_llama,
     calc_rope_omega_classic,
@@ -32,7 +33,7 @@ class Tiny_MoE_Config(Config):
     top_k: int = 2  # number of top experts to use
     load_factor = 1.00 # load factor for expert buffers
     aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
-    n_mlp_hidden: int = 1728  # number of hidden dimensions
+    n_mlp_hidden: int = 2304  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
