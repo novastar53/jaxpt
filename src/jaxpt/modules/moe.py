@@ -167,11 +167,7 @@ class MOE(nnx.Module):
         _, C = x.shape
         top_k_logits, expert_indices = jax.lax.top_k(logits, self.top_k) # T, top_K
         zeros = jnp.full_like(logits, float('-inf')) # T, n_experts
-        sparse_logits = jnp.put_along_axis(
-        zeros, expert_indices, top_k_logits, axis=-1, inplace=False) # T, n_experts
-        expert_probs = jax.nn.softmax(sparse_logits, axis=-1) # T, n_experts  
-        nonzero_idxs = jnp.nonzero(expert_probs, size=T*self.top_k)
-        expert_probs = expert_probs[tuple(nonzero_idxs)].reshape(T, self.top_k)
+        expert_probs = jax.nn.softmax(top_k_logits, axis=-1) # T, n_experts  
 
         # Swap the sequence (T) and top_k dimensions so that when the array is
         # flattened, the higher ranked experts appear first.
@@ -237,16 +233,16 @@ class MOE(nnx.Module):
             lambda x, i, p: x[i, p]
             )(expert_outputs, expert_indices, expert_positions)
 
-        expert_outputs = jnp.einsum("BTKC,BTK->BTC", expert_outputs, top_k_probs)       
-        expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
-        return expert_outputs, 0, (top_k_probs,)
+        y_pred = jnp.einsum("BTKC,BTK->BTC", expert_outputs, top_k_probs)       
+        y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
+        return y_pred, 0, (top_k_probs,)
 
 def loss_fn(model, x, y):
     y_pred, aux_loss, debug_outputs = model(x)
     loss = jnp.mean((y - y_pred)**2) + 0.01 * aux_loss
     return loss, debug_outputs
 
-#@nnx.jit
+@nnx.jit
 def step(state, x, y):
     (loss, debug_outputs), grads = nnx.value_and_grad(loss_fn, has_aux=True)(state.model, x, y)
     state.update(grads)
