@@ -75,10 +75,7 @@ class Experts(nnx.Module):
         x = jax.lax.with_sharding_constraint(x, spec)
         h = jnp.einsum('eti,eih->eth', x, self.w_c_fc) + self.b_c_fc
         g = jnp.einsum('eti,eih->eth', x, self.w_gate) + self.b_gate
-        g = nnx.silu(g)
-        #og = jnp.einsum('eth,eth->eth', h, g)
-        og = h * g
-        o = jnp.einsum('eth,eho->eto', og, self.w_c_proj) + self.b_c_proj
+        o = jnp.einsum('eth,eho->eto', nnx.silu(h * g), self.w_c_proj) + self.b_c_proj
         o = jax.lax.with_sharding_constraint(o, spec)
         return o
 
@@ -105,7 +102,7 @@ class MOE(nnx.Module):
         self.rngs = rngs
 
 
-    def _get_expert_inputs(self, x, logits):
+    def _get_expert_inputs(self, x, logits, expert_capacity):
         T, _ = logits.shape
         _, C = x.shape
         top_k_logits, expert_indices = jax.lax.top_k(logits, self.top_k) # T, top_K
@@ -126,7 +123,6 @@ class MOE(nnx.Module):
         # Restore the shape and order of expert_indices
         expert_indices = jnp.swapaxes(expert_indices.reshape(-1, T), 0, 1) # T, top_K
 
-        expert_capacity = self.top_k * T 
         zeros = jnp.zeros((self.n_experts, expert_capacity, C)) # n_experts, expert_cap, C
 
         x = jnp.repeat(x, self.top_k, axis=0)
@@ -136,10 +132,10 @@ class MOE(nnx.Module):
         return expert_probs, expert_positions, expert_indices, expert_inputs
 
 
-    def _collect_outputs(self, expert_outputs, expert_indices, expert_positions, top_k_probs):
+    def _collect_outputs(self, expert_outputs, expert_indices, expert_positions, 
+                        top_k_probs):
         T, K, C = expert_outputs.shape
         expert_outputs = expert_outputs[expert_indices, expert_positions]
-        #expert_outputs = jnp.einsum("TK,TKC->TC", top_k_probs, expert_outputs)
         expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
         return expert_outputs
 
@@ -147,6 +143,7 @@ class MOE(nnx.Module):
     def __call__(self, x):
         B, T, C = x.shape
         logits = self.router_gate(x) # B, T, n_experts
+        expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         #if self.add_noise:
         #    logits += 0.01 * jax.random.normal(key=self.rngs.gate_noise(), shape=logits.shape)
 
@@ -154,14 +151,13 @@ class MOE(nnx.Module):
          expert_positions, 
          expert_indices, 
          expert_inputs) = jax.vmap(
-            lambda x, l: self._get_expert_inputs(x, l))(x, logits) # B, n_experts, expert_cap, C 
+            lambda x, l: self._get_expert_inputs(x, l, expert_capacity))(x, logits) # B, n_experts, expert_cap, C 
         
         top_k_probs = jax.lax.with_sharding_constraint(top_k_probs, spec)
         expert_positions = jax.lax.with_sharding_constraint(expert_positions, spec)
         expert_indices = jax.lax.with_sharding_constraint(expert_indices, spec)
         expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
 
-        expert_capacity = self.top_k * T
         expert_inputs = expert_inputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_inputs = jnp.swapaxes(expert_inputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_inputs = expert_inputs.reshape(-1, C) # B * n_experts * expert_cap, C
@@ -174,7 +170,6 @@ class MOE(nnx.Module):
         #aux_loss = jnp.sum(f * P) / (self.n_experts ** 2)
 
         expert_outputs = self.experts(expert_inputs) # n_experts, B * expert_cap, C
-        #expert_outputs = expert_inputs @ jnp.eye(C, C)
         expert_outputs = expert_outputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_outputs = jnp.swapaxes(expert_outputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_outputs = expert_outputs.reshape(B, self.n_experts, expert_capacity, C) # B, n_experts, expert_cap, C
