@@ -136,6 +136,14 @@ class MOE(nnx.Module):
         return expert_probs, expert_positions, expert_indices, expert_inputs
 
 
+    def _collect_outputs(self, expert_outputs, expert_indices, expert_positions, top_k_probs):
+        T, K, C = expert_outputs.shape
+        expert_outputs = expert_outputs[expert_indices, expert_positions]
+        #expert_outputs = jnp.einsum("TK,TKC->TC", top_k_probs, expert_outputs)
+        expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
+        return expert_outputs
+
+
     def __call__(self, x):
         B, T, C = x.shape
         logits = self.router_gate(x) # B, T, n_experts
@@ -172,11 +180,10 @@ class MOE(nnx.Module):
         expert_outputs = expert_outputs.reshape(B, self.n_experts, expert_capacity, C) # B, n_experts, expert_cap, C
         expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
 
-        expert_outputs = jax.vmap(
-            lambda x, i, p: x[i, p]
-            )(expert_outputs, expert_indices, expert_positions)
+        y_pred = jax.vmap(
+            lambda x, i, p, prob: self._collect_outputs(x, i, p, prob)
+            )(expert_outputs, expert_indices, expert_positions, top_k_probs)
 
-        y_pred = jnp.einsum("BTKC,BTK->BTC", expert_outputs, top_k_probs)       
         y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
         return y_pred
 
