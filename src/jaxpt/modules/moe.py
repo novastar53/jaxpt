@@ -2,7 +2,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=4'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=2'
 
 import jax
 
@@ -54,7 +54,7 @@ def create_sharded_model(Model, config, rngs):
 @dataclass(unsafe_hash=True)
 class MOE_Config(Config):
     n_layer = 1
-    top_k = 4
+    top_k = 2
     load_factor = 1.00
     n_experts = len(devices)
     n_embed = 3 
@@ -130,7 +130,8 @@ class Experts(nnx.Module):
 
     def __call__(self, x):
         x = jax.lax.with_sharding_constraint(x, spec)
-        o = jnp.einsum('eti,eii->eti', x, self.w_c_fc)
+        o = jnp.einsum('eti,eio->eto', x, self.w_c_fc)
+        #o = x @ self.w_c_fc
         #h = jnp.einsum('eti,eih->eth', x, self.w_c_fc) + self.b_c_fc
         #g = jnp.einsum('eti,eih->eth', x, self.w_gate) + self.b_gate
         #g = nnx.silu(g)
@@ -186,7 +187,7 @@ class MOE(nnx.Module):
         # Restore the shape and order of expert_indices
         expert_indices = jnp.swapaxes(expert_indices.reshape(-1, T), 0, 1) # T, top_K
 
-        expert_capacity = self.top_k * T
+        expert_capacity = self.top_k * T 
         zeros = jnp.zeros((self.n_experts, expert_capacity, C)) # n_experts, expert_cap, C
 
         x = jnp.repeat(x, self.top_k, axis=0)
@@ -219,6 +220,7 @@ class MOE(nnx.Module):
         expert_inputs = expert_inputs.reshape(-1, C) # B * n_experts * expert_cap, C
         expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
         expert_inputs = expert_inputs.reshape(self.n_experts, B * expert_capacity, C) # n_experts, B * expert_cap, C
+        expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
 
         #f = input_counters / (B * T)
         #P = jnp.mean(expert_probs, axis=0)
@@ -232,19 +234,19 @@ class MOE(nnx.Module):
         expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
 
         expert_outputs = jax.vmap(
-            lambda x, pos, i: x[pos, i]
-            )(expert_outputs, expert_positions, expert_indices)
+            lambda x, i, p: x[i, p]
+            )(expert_outputs, expert_indices, expert_positions)
 
         expert_outputs = jnp.einsum("BTKC,BTK->BTC", expert_outputs, top_k_probs)       
         expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
-        return expert_outputs, 0, (None,)
+        return expert_outputs, 0, (top_k_probs,)
 
 def loss_fn(model, x, y):
     y_pred, aux_loss, debug_outputs = model(x)
     loss = jnp.mean((y - y_pred)**2) + 0.01 * aux_loss
     return loss, debug_outputs
 
-@nnx.jit
+#@nnx.jit
 def step(state, x, y):
     (loss, debug_outputs), grads = nnx.value_and_grad(loss_fn, has_aux=True)(state.model, x, y)
     state.update(grads)
@@ -257,12 +259,12 @@ if __name__ == "__main__":
     with mesh:
         D, B, T, C = 1000, len(devices), 5, config.n_embed
 
-        default = jax.random.key(666)
+        default = jax.random.key(69)
         gate_noise = jax.random.key(42)
         rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
         model = create_sharded_model(MOE, config, rngs)
         model.train(add_noise=True)
-        tx = optax.adam(1e-3)
+        tx = optax.adam(1e-2)
         state = nnx.Optimizer(model, tx)
 
         x = jax.random.normal(jax.random.key(1000), (D * B * T, C))
@@ -292,6 +294,7 @@ if __name__ == "__main__":
                 x_i = jax.device_put(x[i], sharding)
                 y_i = jax.device_put(y[i], sharding)
                 loss, grads, debug_outputs = step(state, x_i, y_i)
+                top_k_probs, = debug_outputs
                 if i % 1000 == 0:
                     end = time()
                     iter_time = 1024 * (end - start) / 1000
