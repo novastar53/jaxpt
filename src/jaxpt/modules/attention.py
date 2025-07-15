@@ -81,6 +81,7 @@ class CausalSelfAttention(SelfAttentionBase):
                 getattr(config, "attn_c_attn_bias_sharding", ("model",)),
             ),
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.c_proj = nnx.Linear(
@@ -97,6 +98,7 @@ class CausalSelfAttention(SelfAttentionBase):
                 getattr(config, "attn_c_proj_bias_sharding", ("model",)),
             ),
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         if config.sdpa_implementation == "slow":
@@ -157,6 +159,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
             ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.wkv = nnx.Linear(
@@ -172,6 +175,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
             ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.wproj = nnx.Linear(
@@ -189,6 +193,7 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
             ),
             use_bias=config.attention_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.n_head = config.n_head

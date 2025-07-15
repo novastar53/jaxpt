@@ -1,10 +1,6 @@
 from functools import partial
 
-import jax
 import flax.nnx as nnx
-import jax.numpy as jnp
-
-from jax.sharding import PartitionSpec
 
 from jaxpt.modules.config import Config
 
@@ -30,6 +26,7 @@ class GLU(nnx.Module):
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.gate = nnx.Linear(
@@ -44,6 +41,7 @@ class GLU(nnx.Module):
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.c_proj = nnx.Linear(
@@ -60,6 +58,7 @@ class GLU(nnx.Module):
             ),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         match config.glu_activation:
@@ -96,6 +95,7 @@ class MLP(nnx.Module):
             ),
             bias_init=nnx.with_partitioning(nnx.initializers.zeros, fc_bias_sharding),
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.c_proj = nnx.Linear(
@@ -109,6 +109,7 @@ class MLP(nnx.Module):
             ),
             bias_init=nnx.with_partitioning(nnx.initializers.zeros, proj_bias_sharding),
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
 

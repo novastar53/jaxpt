@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
+from flax.nnx.nn import dtypes
 from jax.sharding import PartitionSpec
 
 from jaxpt.modules.config import Config
@@ -29,27 +30,28 @@ class Experts(nnx.Module):
                 config.n_experts,
                 config.n_embed,
                 config.n_mlp_hidden
-            )
+            ),
+            config.param_dtype
         ))
         self.b_c_fc = nnx.Param(b_init(rngs.default(),
         (
             config.n_experts,
             1,
             config.n_mlp_hidden
-        )))
+        ), config.param_dtype))
 
         self.w_gate = nnx.Param(w_c_fc_init(rngs.default(),
         (
             config.n_experts,
             config.n_embed,
             config.n_mlp_hidden
-        )))
+        ), config.param_dtype))
         self.b_gate = nnx.Param(b_init(rngs.default(),
         (
             config.n_experts,
             1,
             config.n_mlp_hidden
-        )))
+        ), config.param_dtype))
 
         self.w_c_proj = nnx.Param(
             w_c_proj_init(
@@ -58,7 +60,7 @@ class Experts(nnx.Module):
                     config.n_experts,
                     config.n_mlp_hidden,
                     config.n_embed
-                ))
+                ), config.param_dtype)
         )
         self.b_c_proj = nnx.Param(
             b_init(
@@ -67,15 +69,22 @@ class Experts(nnx.Module):
                     config.n_experts,
                     1,
                     config.n_embed
-                )
+                ),
+                config.param_dtype
             )
         )
+        self.config = config
 
     def __call__(self, x):
+        (x, w_c_fc, b_c_fc, w_gate, 
+        b_gate, w_c_proj, b_c_proj) = dtypes.promote_dtype(
+        (x, self.w_c_fc.value, self.b_c_fc.value, self.w_gate.value, 
+        self.b_gate.value, self.w_c_proj.value, self.b_c_proj.value), dtype=self.config.dtype
+        )
         x = jax.lax.with_sharding_constraint(x, spec)
-        h = jnp.einsum('eti,eih->eth', x, self.w_c_fc) + self.b_c_fc
-        g = jnp.einsum('eti,eih->eth', x, self.w_gate) + self.b_gate
-        o = jnp.einsum('eth,eho->eto', nnx.silu(h * g), self.w_c_proj) + self.b_c_proj
+        h = jnp.einsum('eti,eih->eth', x, w_c_fc) + b_c_fc
+        g = jnp.einsum('eti,eih->eth', x, w_gate) + b_gate
+        o = jnp.einsum('eth,eho->eto', nnx.silu(h * g), w_c_proj) + b_c_proj
         o = jax.lax.with_sharding_constraint(o, spec)
         return o
 
@@ -92,6 +101,7 @@ class MOE(nnx.Module):
             sharding=(None,)),
             use_bias=config.mlp_bias,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.experts = Experts(config, rngs)

@@ -21,7 +21,8 @@ from jaxpt.modules.position import (
 @dataclass(eq=True, unsafe_hash=True)
 class Tiny_MoE_Config(Config):
     name: str = "Tiny_MoE"
-    dtype: jnp.dtype = jnp.float32
+    dtype: jnp.dtype = jnp.bfloat16 # computation dype
+    param_dtype: jnp.dtype = jnp.float32 # parameter dtype
     block_size: int = 2048  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
     n_layer: int = 32  # number of attention blocks
@@ -78,6 +79,7 @@ class GLU_Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.attn = GQ_Attention(config, rope_omega=rope_omega, rngs=rngs)
@@ -85,6 +87,7 @@ class GLU_Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.glu = GLU(config, rngs)
@@ -103,6 +106,7 @@ class MOE_Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.attn = GQ_Attention(config, rope_omega=rope_omega, rngs=rngs)
@@ -110,6 +114,7 @@ class MOE_Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
         self.moe = MOE(config, rngs)
@@ -127,9 +132,12 @@ class Tiny_MoE(nnx.Module):
             config.vocab_size,
             config.n_embed,
             embedding_init=nnx.with_partitioning(
-                nnx.initializers.normal(stddev=config.init_stddev),
+                nnx.initializers.normal(stddev=config.init_stddev,
+                dtype=config.param_dtype),
                 (None,) 
             ),
+            dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
 
@@ -152,6 +160,7 @@ class Tiny_MoE(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            param_dtype=config.param_dtype,
             rngs=rngs,
         )
 
