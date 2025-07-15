@@ -59,14 +59,20 @@ def update_param(
     return state
 
 
-def count_params(m: nnx.Module) -> int:
+def count_params(m: nnx.Module, layer_type: str | None = None) -> int:
     def get_size(y):
         return y.size
-
-    _, params, _ = nnx.split(m, nnx.Param, nnx.Variable)
+    
+    if layer_type is not None:
+        def _filter(path, val):
+            return issubclass(val.type, nnx.Param) and layer_type in path
+        _, params, _ = nnx.split(m, _filter, nnx.Variable)
+    else:
+        _, params, _ = nnx.split(m, nnx.Param, nnx.Variable)
     param_counts = jax.tree_util.tree_map(get_size, params)
     total_params = jax.tree_util.tree_reduce(
         lambda x, y: x + y, param_counts, 0
     )
 
     return total_params
+
