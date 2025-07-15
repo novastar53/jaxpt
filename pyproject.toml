@@ -47,6 +47,8 @@ dev = [
     "jaxpt",
     "xprof>=2.20.1",
     "tensorboard>=2.19.0",
+    "boto3>=1.39.4",
+    "smart-open[s3]>=7.3.0.post1",
 ]
 
 [tool.hatch.build]

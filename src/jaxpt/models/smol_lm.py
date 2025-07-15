@@ -38,12 +38,12 @@ class SmolLM_Config(Config):
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
     )
-    rope_theta: int = 1e-4  # base frequency for rope
+    rope_theta: float = 1e-4  # base frequency for rope
     init_stddev: float = 0.02  # stddev for layer init
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
 
-    mesh: jax.sharding.Mesh = None  # device mesh
+    mesh: jax.sharding.Mesh | None = None  # device mesh
     mlp_fc_kernel_sharding: tuple = (None,)
     mlp_fc_bias_sharding: tuple = (None,)
     mlp_proj_kernel_sharding: tuple = (None,)
