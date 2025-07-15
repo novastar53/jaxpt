@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
-from jaxpt.models.mobile_llm import Mobile_LLM, MobileLLM_Config, convert_to_hf
+from jaxpt.models.smol_lm import SmolLM, SmolLM_Config, convert_to_hf
 
 
 from transformers import AutoModelForCausalLM, AutoTokenizer

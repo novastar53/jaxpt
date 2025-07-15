@@ -79,7 +79,7 @@ def generate_completions(
     key=None,
 ):
     if enc is None:
-        enc = (tiktoken.get_encoding("gpt2"),)
+        enc = tiktoken.get_encoding("gpt2")
     if key is None:
         key = jax.random.PRNGKey(1337)
 
