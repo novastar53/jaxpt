@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
-from jaxpt.models.smol_lm import SmolLM, SmolLM_Config, convert_to_hf
+from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config 
 
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -73,10 +73,10 @@ def main():
     #                    n_mlp_hidden=1536,
     #                    sdpa_implementation="xla")
 
-    # flax_model = Mobile_LLM.from_checkpoint(args.model_name_or_path, rngs=rngs, config=config)
+    flax_model = Tiny_MoE(Tiny_MoE_Config(), nnx.Rngs(0))
     # hf_model = convert_to_hf(flax_model)
     # hf_tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
-    hf_model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    #hf_model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
 
     model_cfg = TransformersModelConfig(
         model_name="HuggingFaceTB/SmolLM-135M",
@@ -102,7 +102,7 @@ def main():
         tasks=",".join(tasks),
         pipeline_parameters=params,
         evaluation_tracker=tracker,
-        model=hf_model,
+        model=flax_model,
         model_config=model_cfg,
     )
 
