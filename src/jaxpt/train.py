@@ -30,12 +30,32 @@ def loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
 
 
 @nnx.jit
-def train_step(model, optimizer, batch, targets):
+def train_step(model, optimizer, batch, target):
     batch = batch.squeeze()
-    targets = targets.squeeze()
-    loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
+    target = target.squeeze()
+    loss, grads = nnx.value_and_grad(loss_fn)(model, batch, target)
     optimizer.update(grads)
-    return loss, grads
+    return loss
+
+
+@nnx.jit
+def accum_train_step(model, optimizer, batches, targets):
+    accum_grads, accum_loss = None, 0
+    for batch, target in zip(batches, targets):
+        batch = batch.squeeze()
+        target = target.squeeze()
+        loss, grads = nnx.value_and_grad(loss_fn)(model, batch, target)
+        if accum_grads is None:
+            accum_grads = grads
+        else:
+            accum_grads = jax.tree_util.tree_map(
+                lambda x, y: x + y, accum_grads, grads
+            )
+        accum_loss += loss
+    grads = jax.tree_util.tree_map(lambda x: x / len(batches), accum_grads)
+    loss = accum_loss / len(batches)
+    optimizer.update(grads)
+    return loss
 
 
 @nnx.pmap(
@@ -54,7 +74,7 @@ def parallel_train_step(
 
 
 @nnx.pmap(axis_name="devices", in_axes=(None, None, 0, 0), out_axes=(0, 0, 0))
-def accum_train_step(model, optimizer, batches, targets):
+def accum_parallel_train_step(model, optimizer, batches, targets):
     accum_grads = None
     accum_loss = 0
     for batch, target in zip(batches, targets, strict=False):
