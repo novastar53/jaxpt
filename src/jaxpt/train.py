@@ -30,12 +30,23 @@ def loss_fn(model, batch, targets, attn_mask=None, label_mask=None):
 
 
 @nnx.jit
-def train_step(model, optimizer, batch, targets):
-    batch = batch.squeeze()
-    targets = targets.squeeze()
-    loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
+def train_step(model, optimizer, batches, targets):
+    accum_grads, accum_loss = None, 0
+    for batch, target in zip(batches, targets):
+        batch = batch.squeeze()
+        target = target.squeeze()
+        loss, grads = nnx.value_and_grad(loss_fn)(model, batch, target)
+        if accum_grads is None:
+            accum_grads = grads
+        else:
+            accum_grads = jax.tree_util.tree_map(
+                lambda x, y: x + y, accum_grads, grads
+            )
+        accum_loss += loss
+    grads = jax.tree_util.tree_map(lambda x: x / len(batches), accum_grads)
+    loss = accum_loss / len(batches)
     optimizer.update(grads)
-    return loss, grads
+    return loss
 
 
 @nnx.pmap(
