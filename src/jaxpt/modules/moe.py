@@ -109,7 +109,7 @@ class MOE(nnx.Module):
         self.n_experts = config.n_experts
         self.load_factor = config.load_factor
         self.add_noise = False
-        self.rngs = rngs
+        #self.rngs = rngs
 
 
     def _get_expert_inputs(self, x, logits, expert_capacity):
