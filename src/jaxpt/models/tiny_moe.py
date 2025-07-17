@@ -199,7 +199,6 @@ class Tiny_MoE(nnx.Module):
         fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config]
     ):
         config = config if config else Tiny_MoE_Config()
-        model = Tiny_MoE(config=config, rngs=rngs)
         abstract_model = nnx.eval_shape(
             lambda: Tiny_MoE(config=config, rngs=rngs)
         )
