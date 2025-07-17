@@ -109,6 +109,7 @@ class MOE(nnx.Module):
         self.n_experts = config.n_experts
         self.load_factor = config.load_factor
         self.add_noise = False
+        self.aux_loss = False
         self.rngs = rngs
 
 
@@ -175,10 +176,6 @@ class MOE(nnx.Module):
         expert_inputs = expert_inputs.reshape(self.n_experts, B * expert_capacity, C) # n_experts, B * expert_cap, C
         expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
 
-        frac = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (B * T)
-        ideal = self.top_k / self.n_experts
-        aux_loss = self.n_experts * jnp.sum((frac - ideal) ** 2)
-
         expert_outputs = self.experts(expert_inputs) # n_experts, B * expert_cap, C
         expert_outputs = expert_outputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_outputs = jnp.swapaxes(expert_outputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
@@ -190,5 +187,12 @@ class MOE(nnx.Module):
             )(expert_outputs, expert_indices, expert_positions, top_k_probs)
 
         y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
-        return y_pred, aux_loss
+
+        if self.aux_loss is True:
+            frac = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (B * T)
+            ideal = self.top_k / self.n_experts
+            aux_loss = self.n_experts * jnp.sum((frac - ideal) ** 2)
+            return y_pred, aux_loss
+        
+        return y_pred
 

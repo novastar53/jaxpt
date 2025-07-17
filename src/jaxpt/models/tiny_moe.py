@@ -95,7 +95,8 @@ class GLU_Block(nnx.Module):
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
         x = self.glu(self.rms_n_2(x)) + x
-        return x
+        aux = 0
+        return x, aux
 
 
 class MOE_Block(nnx.Module):
@@ -118,11 +119,17 @@ class MOE_Block(nnx.Module):
             rngs=rngs,
         )
         self.moe = MOE(config, rngs)
+        self.aux_loss = False
 
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
-        x = self.moe(self.rms_n_2(x)) + x
-        return x
+        if self.aux_loss is True:
+            moe_out, moe_aux_loss = self.moe(self.rms_n_2(x))
+            return x, moe_aux_loss
+        else:
+            moe_out = self.moe(self.rms_n_2(x))
+            x = moe_out + x
+            return x
 
 
 class Tiny_MoE(nnx.Module):
@@ -163,15 +170,25 @@ class Tiny_MoE(nnx.Module):
             param_dtype=config.param_dtype,
             rngs=rngs,
         )
+        self.aux_loss = False
 
     def __call__(self, idx, mask=None):
         x = self.wte(idx)
+        total_aux_loss = 0
+        if self.aux_loss is True:
+            for block in self.h:
+                x, aux_loss = block(x, mask)
+                total_aux_loss += aux_loss
+            x = self.rms_n_f(x)
+            logits = self.wte.attend(x)
+            return logits, total_aux_loss
+        
         for block in self.h:
             x = block(x, mask)
-        x = self.rms_n_f(x)
-        logits = self.wte.attend(x)
-        return logits
-
+            x = self.rms_n_f(x)
+            logits = self.wte.attend(x)
+            return logits
+            
     def save_checkpoint(self, fpath: str):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
