@@ -35,7 +35,7 @@ def train_step(model, optimizer, batch, targets):
     targets = targets.squeeze()
     loss, grads = nnx.value_and_grad(loss_fn)(model, batch, targets)
     optimizer.update(grads)
-    return loss, grads
+    return loss 
 
 
 @nnx.pmap(
