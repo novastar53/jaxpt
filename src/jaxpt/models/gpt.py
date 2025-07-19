@@ -1,7 +1,6 @@
 from typing import Literal, Optional
 from dataclasses import dataclass
 
-import torch
 import jax.numpy as jnp
 import flax.nnx as nnx
 
@@ -105,6 +104,7 @@ class GPT(nnx.Module):
 
 
 def from_huggingface_pretrained(rngs: nnx.Rngs) -> GPT:
+    import torch
     config = GPTConfig()
     model = GPT(config, rngs)
     graphdef, sd = nnx.split(model)
