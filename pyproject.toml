@@ -28,10 +28,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-eval = [
-    "torch==2.7.1",
-    "lighteval[math]>=0.10.0",
-]
+#eval = [
+#    "torch==2.7.1",
+#    "lighteval[math]>=0.10.0",
+#]
 cuda = [
     "jax[cuda12]==0.6.2",
 ]
