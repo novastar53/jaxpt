@@ -195,6 +195,57 @@ class CloudDataLoader(BaseDataLoader):
         return tokens
 
 
+class BlendedCloudDataLoader():
+    def __init__(
+        self,
+        batch_size: int,
+        block_size: int,
+        bucket_names: List[str],
+        bucket_prefixes: List[str],
+        proportions: List[float],
+        device_rank: int, 
+        label: str | None = None,
+        quiet: bool = False
+    ):
+        self.B = batch_size
+        self.T = block_size
+        self.D = device_rank
+        batch_sizes = self._calc_batch_sizes(batch_size, proportions)
+        self.dataloaders = []
+        for bucket_name, bucket_prefix, batch_size in zip(bucket_names, bucket_prefixes, batch_sizes):
+            self.dataloaders.append(
+                CloudDataLoader(bucket_name, bucket_prefix, batch_size, block_size, device_rank, label, quiet)
+            )
+
+    def __call__(self):
+        X, Y = [], []
+        for dataloader in self.dataloaders:
+            _X, _Y = dataloader()
+            X.append(_X)
+            Y.append(_Y)
+        
+        X = np.concatenate(X, axis=1)
+        Y = np.concatenate(Y, axis=1)
+
+        assert(X.shape == (self.D, self.B, self.T))
+
+        return X, Y
+
+
+    def _calc_batch_sizes(self, B, ratios):
+        ratios = np.array(ratios)
+        assert(B >= len(ratios))
+        batch_proportions = jnp.astype(B * ratios / sum(ratios), jnp.int32)
+        if sum(batch_proportions) < B:
+            diff = B - sum(batch_proportions)
+            while diff > 0:
+                min_idx = jnp.argmin(batch_proportions)
+                batch_proportions = batch_proportions.at[min_idx].add(1)
+                diff -= 1
+        assert(sum(batch_proportions) == B)
+        return batch_proportions
+
+
 class HuggingfaceDataLoader(BaseDataLoader):
     def __init__(
         self,
