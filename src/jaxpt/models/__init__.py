@@ -6,6 +6,7 @@ from .gpt import (
     from_huggingface_pretrained,
 )
 from .glu_gpt import GLU_GPTConfig, GLU_GPT
+from .gqa_gpt import GQA_GPTConfig, GQA_GPT
 from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
