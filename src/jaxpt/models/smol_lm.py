@@ -8,13 +8,8 @@ import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
 from jaxpt.modules.attention import GQ_Attention_w_RoPE
-from jaxpt.modules.mlp import GLU, MLP
-from jaxpt.modules.position import (
-    calc_rope_omega_llama,
-    calc_rope_omega_classic,
-    RoPE_Llama,
-    RoPE_Classic,
-)
+from jaxpt.modules.mlp import GLU 
+from jaxpt.modules.position import calc_rope_omega_llama
 from jaxpt.utils import create_sharded_model
 
 
@@ -44,10 +39,6 @@ class SmolLM_Config(Config):
     pad_token: str = "<pad>"
 
     mesh: jax.sharding.Mesh | None = None  # device mesh
-    mlp_fc_kernel_sharding: tuple = (None,)
-    mlp_fc_bias_sharding: tuple = (None,)
-    mlp_proj_kernel_sharding: tuple = (None,)
-    mlp_proj_bias_sharding: tuple = (None,)
 
     glu_fc_kernel_sharding: tuple = (None,)
     glu_fc_bias_sharding: tuple = (None,)
@@ -76,7 +67,7 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros,
+                nnx.initializers.ones,
                 getattr(config, "rms_n_1_sharding", ("model",)),
             ),
             dtype=config.dtype,
@@ -87,7 +78,7 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             scale_init=nnx.with_partitioning(
-                nnx.initializers.zeros,
+                nnx.initializers.ones,
                 getattr(config, "rms_n_2_sharding", ("model",)),
             ),
             dtype=config.dtype,

@@ -4,15 +4,13 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
+import orbax.checkpoint as ocp
 
 from jaxpt.modules.attention import GQ_Attention_w_RoPE
 from jaxpt.modules.mlp import GLU
 from jaxpt.modules.config import Config
 from jaxpt.utils import update_param, get_param
-from jaxpt.modules.position import (
-    calc_rope_omega_llama,
-)
-import orbax.checkpoint as ocp
+from jaxpt.modules.position import calc_rope_omega_llama
 
 
 @dataclass(eq=True, unsafe_hash=True)
