@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.attention import GQ_Attention
+from jaxpt.modules.attention import GQ_Attention_w_RoPE
 from jaxpt.modules.mlp import GLU, MLP
 from jaxpt.modules.position import (
     calc_rope_omega_llama,
@@ -82,7 +82,7 @@ class Block(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        self.attn = GQ_Attention(config, rope_omega=rope_omega, rngs=rngs)
+        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,

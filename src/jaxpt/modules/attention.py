@@ -138,12 +138,10 @@ class CausalSelfAttention(SelfAttentionBase):
         return y
 
 
-class GQ_Attention(SelfAttentionBase, RoPE_Llama):
+class GQ_Attention(SelfAttentionBase):
     def __init__(
-        self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs
+        self, config: Config, rngs: nnx.Rngs
     ):
-        RoPE_Llama.__init__(self, omega=rope_omega)
-
         self.config = config
 
         self.wq = nnx.Linear(
@@ -202,6 +200,14 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         self.key_cache = None
         self.value_cache = None
 
+
+    def _apply_attn(self, q, k, v, mask):
+        y = _calc_attention(
+            q, k, v, implementation=self.implementation, mask=mask
+        )  # (B, T, n_head, C // n_head)
+        return y
+
+
     def __call__(self, x, mask=None):
         B, x_T, C = x.shape
         q = self.wq(x)  # (B, x_T, C)
@@ -216,7 +222,6 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
         offset = 0
         if self.key_cache is not None:
             offset = self.key_cache.shape[1]
-        q = self.apply_rope(q, offset=offset)
 
         if self.config.use_cache is True:
             if self.key_cache is None:
@@ -240,14 +245,32 @@ class GQ_Attention(SelfAttentionBase, RoPE_Llama):
                 v = self.value_cache
 
         k = k.reshape((B, k_T, self.n_kv_head, C // self.n_head))
-        k = self.apply_rope(k)
-
         v = v.reshape((B, v_T, self.n_kv_head, C // self.n_head))
 
-        y = _calc_attention(
-            q, k, v, implementation=self.implementation, mask=mask
+        y = self._apply_attn(
+            q, k, v, mask=mask
         )  # (B, T, n_head, C // n_head)
 
         y = jnp.reshape(y, (B, x_T, C))
         y = self.wproj(y)
         return y
+
+
+class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
+    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+        GQ_Attention.__init__(self, config, rngs) 
+        RoPE_Llama.__init__(self, omega=rope_omega)
+
+
+    def _apply_attn(self, q, k, v, mask):
+        offset = 0
+        if self.key_cache is not None:
+            offset = self.key_cache.shape[1]
+
+        q = self.apply_rope(q, offset=offset)
+        k = self.apply_rope(k)
+        y = _calc_attention(
+            q, k, v, implementation=self.implementation, mask=mask
+        )  # (B, T, n_head, C // n_head)
+        return y
+

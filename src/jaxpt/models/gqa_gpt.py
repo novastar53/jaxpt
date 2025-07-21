@@ -9,12 +9,6 @@ from jaxpt.modules.attention import GQ_Attention
 from jaxpt.modules.mlp import MLP
 from jaxpt.modules.config import Config
 from jaxpt.utils import update_param, get_param
-from jaxpt.modules.position import (
-    calc_rope_omega_llama,
-    calc_rope_omega_classic,
-    RoPE_Llama,
-    RoPE_Classic,
-)
 import orbax.checkpoint as ocp
 
 
@@ -31,7 +25,6 @@ class GQA_GPTConfig(Config):
     ln_epsilon: float = 1e-5
     init_stddev: float = 0.02  # stddev for layer init
     sdpa_implementation: Literal["xla", "cudnn"] = ("xla")
-    rope_theta: float = 1e-4  # base frequency for rope
     attention_bias: bool = False  # use bias in attention layers
     use_cache: bool = False  # use kv caching
     
@@ -55,7 +48,7 @@ class GQA_GPTConfig(Config):
 
 
 class Block(nnx.Module):
-    def __init__(self, config: GQA_GPTConfig, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+    def __init__(self, config: GQA_GPTConfig, rngs: nnx.Rngs):
         self.ln_1 = nnx.LayerNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -70,7 +63,7 @@ class Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention(config, rope_omega=rope_omega, rngs=rngs)
+        self.attn = GQ_Attention(config, rngs=rngs)
         self.ln_2 = nnx.LayerNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -117,15 +110,8 @@ class GQA_GPT(nnx.Module):
             dtype=config.dtype,
             rngs=rngs,
         )
-        # pre-calculate the RoPE thetas
-        omega = calc_rope_omega_llama(
-            config.n_embed,
-            config.n_head,
-            config.block_size,
-            config.rope_theta,
-            config.dtype,
-        )
-        self.h = [Block(config, rope_omega=omega, rngs=rngs) for _ in range(config.n_layer)]
+
+        self.h = [Block(config, rngs=rngs) for _ in range(config.n_layer)]
         self.ln_f = nnx.LayerNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -142,7 +128,11 @@ class GQA_GPT(nnx.Module):
         )
 
     def __call__(self, idx):
+        B, T = idx.shape
+        pos = jnp.arange(0, T, dtype=jnp.uint16)
+        pos_emb = self.wpe(pos)
         x = self.wte(idx)  # (B x T x C)
+        x = x + pos_emb
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
