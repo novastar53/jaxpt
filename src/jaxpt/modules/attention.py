@@ -114,24 +114,21 @@ class CausalSelfAttention(SelfAttentionBase):
         self.n_embed = config.n_embed
         self.implementation = config.sdpa_implementation
 
-    def __call__(self, x):
+    def _apply_attn(self, q, k, v, mask=None):
+        return _calc_attention(q, k, v, implementation=self.implementation, mask=mask)
+
+    def __call__(self, x, mask=None):
         B, T, C = x.shape
         qkv = self.c_attn(x)  # B, T, 3 * C
         q, k, v = jnp.split(qkv, 3, axis=-1)  # 3 * (B, T, C)
 
-        q = jnp.reshape(
-            q, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
+        q = jnp.reshape(q, (B, T, self.n_head, C // self.n_head))  # B, T, n_head, C // n_head
 
-        k = jnp.reshape(
-            k, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
+        k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head))  # B, T, n_head, C // n_head
 
-        v = jnp.reshape(
-            v, (B, T, self.n_head, C // self.n_head)
-        )  # B, T, n_head, C // n_head
+        v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head))  # B, T, n_head, C // n_head
 
-        y = _calc_attention(q, k, v, implementation=self.implementation)
+        y = self._apply_attn(q, k, v, mask=mask)
 
         y = jnp.reshape(y, (B, T, C))  # (B, T, C)
         y = self.c_proj(y)
@@ -272,5 +269,20 @@ class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
         y = _calc_attention(
             q, k, v, implementation=self.implementation, mask=mask
         )  # (B, T, n_head, C // n_head)
+        return y
+
+
+class CausalSelfAttention_w_RoPE(CausalSelfAttention, RoPE_Llama):
+    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+        CausalSelfAttention.__init__(self, config, rngs)
+        RoPE_Llama.__init__(self, omega=rope_omega)
+
+    def _apply_attn(self, q, k, v, mask=None):
+        # Apply RoPE to q and k
+        q = self.apply_rope(q)
+        k = self.apply_rope(k)
+        y = _calc_attention(
+            q, k, v, implementation=self.implementation, mask=mask
+        )
         return y
 
