@@ -8,6 +8,7 @@ from .gpt import (
 from .glu_gpt import GLU_GPTConfig, GLU_GPT
 from .gqa_gpt import GQA_GPTConfig, GQA_GPT
 from .rope_gpt import RoPE_GPTConfig, RoPE_GPT
+from .glu_rope_gpt import GLU_RoPE_GPTConfig, GLU_RoPE_GPT
 from .nope_gpt import (
     NoPE_GPTConfig,
     NoPE_GPT,
