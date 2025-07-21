@@ -1,6 +1,7 @@
 from typing import Literal, Optional
 from dataclasses import dataclass
 
+import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
@@ -13,17 +14,34 @@ from transformers import GPT2LMHeadModel
 import orbax.checkpoint as ocp
 
 
-@dataclass
+@dataclass(eq=True, unsafe_hash=True)
 class GPTConfig(Config):
     dtype: jnp.dtype = jnp.float32
     block_size: int = 1024  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
     n_layer: int = 12  # number of attention blocks
     n_head: int = 12  # number of attention heads
-    n_embed: int = 768  # number token embedding dimensionsa
-    n_mlp_hidden: int = 4 * 768  # hiden size for piecewise FFN
+    n_embed: int = 768  # number token embedding dimensions
+    n_mlp_hidden: int = 4 * 768  # hidden size for piecewise FFN
     ln_epsilon: float = 1e-5
-    sdpa_implementation: Literal["xla", "cudnn"] = "xla"
+    init_stddev: float = 0.02  # stddev for layer init
+    sdpa_implementation: Literal["xla", "cudnn"] = ("xla")
+    
+    #mesh: jax.sharding.Mesh | None = None  # device mesh
+    
+    embed_partition_spec: tuple = (None,)
+    pos_embed_partition_spec: tuple = (None,)
+    ln_partition_spec: tuple = (None,)
+
+    mlp_fc_kernel_sharding: tuple = (None,)
+    mlp_fc_bias_sharding: tuple = (None,)
+    mlp_proj_kernel_sharding: tuple = (None,)
+    mlp_proj_bias_sharding: tuple = (None,)
+
+    attn_c_attn_kernel_sharding: tuple = (None,)
+    attn_c_attn_bias_sharding: tuple = (None,)
+    attn_c_proj_kernel_sharding: tuple = (None,)
+    attn_c_proj_bias_sharding: tuple = (None,)
 
 
 class Block(nnx.Module):
@@ -32,6 +50,14 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.attn = CausalSelfAttention(config, rngs=rngs)
@@ -39,6 +65,14 @@ class Block(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.mlp = MLP(config, rngs=rngs)
@@ -55,7 +89,10 @@ class GPT(nnx.Module):
         self.wte = nnx.Embed(
             config.vocab_size,
             config.n_embed,
-            embedding_init=nnx.initializers.normal(stddev=0.02),
+            embedding_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev, dtype=config.param_dtype),
+                getattr(config, "embed_partition_spec", (None,))
+            ),
             dtype=config.dtype,
             param_dtype=config.dtype,
             rngs=rngs,
@@ -63,7 +100,10 @@ class GPT(nnx.Module):
         self.wpe = nnx.Embed(
             config.block_size,
             config.n_embed,
-            embedding_init=nnx.initializers.normal(stddev=0.02),
+            embedding_init=nnx.with_partitioning(
+                nnx.initializers.normal(stddev=config.init_stddev, dtype=config.param_dtype),
+                getattr(config, "pos_embed_partition_spec", (None,))
+            ),
             dtype=config.dtype,
             rngs=rngs,
         )
@@ -72,6 +112,14 @@ class GPT(nnx.Module):
             config.n_embed,
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
+            bias_init=nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "ln_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
 
