@@ -159,6 +159,7 @@ class SmolLM(nnx.Module):
 def from_hf_pretrained(
     config: SmolLM_Config, rngs: nnx.Rngs, sharded=False
 ) -> SmolLM:
+    import torch
     if sharded:
         m = SmolLM(config, rngs)
     else:
@@ -229,6 +230,7 @@ def from_hf_pretrained(
 
 
 def load_hf_pretrained(model_name="HuggingFaceTB/SmolLM-135M"):
+    import torch
     from transformers import AutoModelForCausalLM
 
     model = AutoModelForCausalLM.from_pretrained(model_name)
