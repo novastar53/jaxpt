@@ -47,11 +47,6 @@ class Tiny_MoE_Config(Config):
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
 
-    mlp_fc_kernel_sharding: tuple = (None,)
-    mlp_fc_bias_sharding: tuple = (None,)
-    mlp_proj_kernel_sharding: tuple = (None,)
-    mlp_proj_bias_sharding: tuple = (None,)
-
     glu_fc_kernel_sharding: tuple = (None,)
     glu_fc_bias_sharding: tuple = (None,)
     glu_gate_kernel_sharding: tuple = (None,)
@@ -59,16 +54,15 @@ class Tiny_MoE_Config(Config):
     glu_proj_kernel_sharding: tuple = (None,)
     glu_proj_bias_sharding: tuple = (None,)
 
-    attn_c_attn_kernel_sharding: tuple = (None,)
-    attn_c_attn_bias_sharding: tuple = (None,)
-    attn_c_proj_kernel_sharding: tuple = (None,)
-    attn_c_proj_bias_sharding: tuple = (None,)
     attn_wq_kernel_sharding: tuple = (None,)
     attn_wq_bias_sharding: tuple = (None,)
     attn_wkv_kernel_sharding: tuple = (None,)
     attn_wkv_bias_sharding: tuple = (None,)
     attn_wproj_kernel_sharding: tuple = (None,)
     attn_wproj_bias_sharding: tuple = (None,)
+
+    embed_partition_spec: tuple = (None,)
+    rmsnorm_partition_spec: tuple = (None,)
 
 
 class GLU_Block(nnx.Module):
@@ -80,6 +74,10 @@ class GLU_Block(nnx.Module):
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
             param_dtype=config.param_dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rmsnorm_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
@@ -88,6 +86,10 @@ class GLU_Block(nnx.Module):
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
             param_dtype=config.param_dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rmsnorm_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.glu = GLU(config, rngs)
@@ -107,6 +109,10 @@ class MOE_Block(nnx.Module):
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
             param_dtype=config.param_dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rmsnorm_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
@@ -115,6 +121,10 @@ class MOE_Block(nnx.Module):
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
             param_dtype=config.param_dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rmsnorm_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.moe = MOE(config, rngs)
@@ -141,7 +151,7 @@ class Tiny_MoE(nnx.Module):
             embedding_init=nnx.with_partitioning(
                 nnx.initializers.normal(stddev=config.init_stddev,
                 dtype=config.param_dtype),
-                (None,) 
+                getattr(config, "embed_partition_spec", (None,))
             ),
             dtype=config.dtype,
             param_dtype=config.param_dtype,
@@ -168,6 +178,10 @@ class Tiny_MoE(nnx.Module):
             epsilon=config.ln_epsilon,
             dtype=config.dtype,
             param_dtype=config.param_dtype,
+            scale_init=nnx.with_partitioning(
+                nnx.initializers.ones,
+                getattr(config, "rmsnorm_partition_spec", (None,))
+            ),
             rngs=rngs,
         )
         self.aux_loss = False
