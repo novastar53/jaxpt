@@ -100,7 +100,7 @@ jupyter-ssh-tunnel:
 # Run Jupyter lab
 PORT ?= 8888
 lab:
-	cd notebooks && nohup uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=$(PORT) > jupyter.log 2>&1 &
+	cd notebooks && nohup uv run jupyter lab --NotebookApp.iopub_data_rate_limit=1.0e10 --NotebookApp.rate_limit_window=10.0 --no-browser --port=$(PORT) --allow-root > jupyter.log 2>&1 &
 	sleep 3
 	jupyter server list 
 
