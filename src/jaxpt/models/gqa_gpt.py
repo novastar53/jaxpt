@@ -143,6 +143,7 @@ class GQA_GPT(nnx.Module):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
+        ckptr.wait_until_finished()
 
     @staticmethod
     def from_checkpoint(fpath: str, rngs: nnx.Rngs, config=Optional[GQA_GPTConfig]):

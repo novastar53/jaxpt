@@ -208,6 +208,7 @@ class Tiny_MoE(nnx.Module):
         _, _, other_state = nnx.split(self, nnx.RngState, ...)
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
+        ckptr.wait_until_finished()
 
     @staticmethod
     def from_checkpoint(
