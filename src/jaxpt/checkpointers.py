@@ -26,21 +26,24 @@ def load_checkpoint(model, output_dir, config, run_dirname, step, rngs):
 def load_checkpoint_from_gcloud(
     model, config, output_dir, bucket_name, run_dirname, step, rngs
 ):
-    client = storage.Client()
-    prefix = f"{config.name}/checkpoints/{run_dirname}/checkpoint-{step}.pt/"
-    checkpoint_path = (
-        output_dir
-        / config.name
-        / "checkpoints"
-        / run_dirname
-        / f"checkpoint-{step}.pt/"
-    )
-    for blob in client.list_blobs(bucket_name, prefix=prefix):
-        if blob.name.endswith("/"):
-            continue
-        rel_path = blob.name[len(prefix) :]
-        dst_path = os.path.join(checkpoint_path, rel_path)
-        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-        blob.download_to_filename(dst_path)
-    m = model.from_checkpoint(checkpoint_path, rngs, config)
-    return m
+    try:
+        return load_checkpoint(model, output_dir, config, run_dirname, step, rngs)
+    except:
+        client = storage.Client()
+        prefix = f"{config.name}/checkpoints/{run_dirname}/checkpoint-{step}.pt/"
+        checkpoint_path = (
+            output_dir
+            / config.name
+            / "checkpoints"
+            / run_dirname
+            / f"checkpoint-{step}.pt/"
+        )
+        for blob in client.list_blobs(bucket_name, prefix=prefix):
+            if blob.name.endswith("/"):
+                continue
+            rel_path = blob.name[len(prefix) :]
+            dst_path = os.path.join(checkpoint_path, rel_path)
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+            blob.download_to_filename(dst_path)
+        m = model.from_checkpoint(checkpoint_path, rngs, config)
+        return m
