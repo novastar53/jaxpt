@@ -109,6 +109,10 @@ gcloud:
 	echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
 	apt-get update && apt-get install google-cloud-cli
 
+# Run unit tests
+unit-test:
+	uv run pytest tests/unit
+
 # Help command
 help:
 	@echo "Available commands:"
@@ -127,4 +131,5 @@ help:
 	@echo "  make list      - Show installed packages"
 	@echo "  make lab       - Run Jupyter lab" 
 	@echo "  make jupyter-ssh-tunnel - SSH tunnel to Jupyter lab"
+	@echo "  make unit-test - Run unit tests"
 	@echo "  make help      - Show this help message"
