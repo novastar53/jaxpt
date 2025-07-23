@@ -46,6 +46,8 @@ class BaseDataLoader(ABC):
         device_rank: int,
         label: str | None = None,
         quiet: bool = False,
+        start_shard: int = 0,
+        start_shard_pos: int = 0,
     ):
         # Common initialization
         self.enc = tiktoken.get_encoding("gpt2")
@@ -57,8 +59,8 @@ class BaseDataLoader(ABC):
 
         # List and filter shards
         self.shards = self._list_shards(label)
-        self.cur_shard = 0
-        self.shard_pos = 0
+        self.cur_shard = start_shard
+        self.shard_pos = start_shard_pos
         self.shard = self._load_shard()
         self.shard_size = len(self.shard)
 
@@ -71,6 +73,8 @@ shard size:     {self.shard_size:,}
 batch size:     {self.B}
 block size:     {self.T}
 device rank:    {self.D}
+start shard:    {start_shard}
+start pos:      {start_shard_pos}
 ------------------------""")
 
     def __len__(self):
@@ -130,9 +134,19 @@ class DataLoader(BaseDataLoader):
         device_rank: int,
         label: str | None = None,
         quiet: bool = False,
+        start_shard: int = 0,
+        start_shard_pos: int = 0,
     ):
         self.dirpath = dirpath
-        super().__init__(batch_size, block_size, device_rank, label, quiet)
+        super().__init__(
+            batch_size,
+            block_size,
+            device_rank,
+            label,
+            quiet,
+            start_shard=start_shard,
+            start_shard_pos=start_shard_pos,
+        )
 
     def _list_shards(self, label):
         shards = os.listdir(self.dirpath)
@@ -165,6 +179,8 @@ class CloudDataLoader(BaseDataLoader):
         device_rank: int,
         label: str | None = None,
         quiet: bool = False,
+        start_shard: int = 0,
+        start_shard_pos: int = 0,
     ):
         from google.cloud import storage
 
@@ -172,7 +188,15 @@ class CloudDataLoader(BaseDataLoader):
         self.bucket_prefix = bucket_prefix
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        super().__init__(batch_size, block_size, device_rank, label, quiet)
+        super().__init__(
+            batch_size,
+            block_size,
+            device_rank,
+            label,
+            quiet,
+            start_shard=start_shard,
+            start_shard_pos=start_shard_pos,
+        )
 
     def _list_shards(self, label):
         blobs = self.bucket.list_blobs(prefix=self.bucket_prefix)
@@ -205,16 +229,34 @@ class BlendedCloudDataLoader():
         proportions: List[float],
         device_rank: int, 
         label: str | None = None,
-        quiet: bool = False
+        quiet: bool = False,
+        start_shards: List[int] = None,
+        start_shard_positions: List[int] = None,
     ):
         self.B = batch_size
         self.T = block_size
         self.D = device_rank
         batch_sizes = self._calc_batch_sizes(batch_size, proportions)
         self.dataloaders = []
-        for bucket_name, bucket_prefix, batch_size in zip(bucket_names, bucket_prefixes, batch_sizes):
+        n = len(bucket_names)
+        # Default to zeros if not provided
+        if start_shards is None:
+            start_shards = [0] * n
+        if start_shard_positions is None:
+            start_shard_positions = [0] * n
+        for i, (bucket_name, bucket_prefix, batch_size) in enumerate(zip(bucket_names, bucket_prefixes, batch_sizes)):
             self.dataloaders.append(
-                CloudDataLoader(bucket_name, bucket_prefix, batch_size, block_size, device_rank, label, quiet)
+                CloudDataLoader(
+                    bucket_name,
+                    bucket_prefix,
+                    batch_size,
+                    block_size,
+                    device_rank,
+                    label,
+                    quiet,
+                    start_shard=start_shards[i],
+                    start_shard_pos=start_shard_positions[i],
+                )
             )
 
     def __call__(self):
@@ -230,7 +272,6 @@ class BlendedCloudDataLoader():
         assert(X.shape == (self.D, self.B, self.T))
 
         return X, Y
-
 
     def _calc_batch_sizes(self, B, ratios):
         ratios = np.array(ratios)
@@ -281,7 +322,16 @@ class HuggingfaceDataLoader(BaseDataLoader):
         self.ds = ds.shuffle(buffer_size=buffer_size, seed=random_seed)
         self.iter_ds = iter(self.ds)
 
-        super().__init__(batch_size, block_size, device_rank, label, quiet)
+        # Always set start_shard and start_shard_pos to 0 for HuggingfaceDataLoader
+        super().__init__(
+            batch_size,
+            block_size,
+            device_rank,
+            label,
+            quiet,
+            start_shard=0,
+            start_shard_pos=0,
+        )
 
     def _list_shards(self, label):
         if self.streaming is True:

@@ -29,9 +29,8 @@ def test_charloader_get_batch():
     x, y = loader.get_batch(key, data, batch_size=2, block_size=5)
     assert x.shape == (2, 5)
     assert y.shape == (2, 5)
-    print(x)
-    print(y)
     # y should be x shifted by 1 within the data, not x + 1 numerically
+    # For each row, y[:, :-1] should equal x[:, 1:]
     np.testing.assert_array_equal(x[:, 1:], y[:, :-1])
 
 def test_basedataloader_call():
@@ -92,7 +91,9 @@ def test_blendedclouddataloader(monkeypatch):
         def __init__(self, *args, **kwargs):
             self.calls = 0
         def __call__(self):
-            x = np.ones((1, 2, 5), dtype=np.uint16) * self.calls
+            # Use batch_size from args if available, else default to 2
+            batch_size = kwargs.get("batch_size", 2) if hasattr(self, "kwargs") else 2
+            x = np.ones((1, batch_size, 5), dtype=np.uint16) * self.calls
             y = x + 1
             self.calls += 1
             return x, y
@@ -104,6 +105,8 @@ def test_blendedclouddataloader(monkeypatch):
         bucket_prefixes=["a", "b"],
         proportions=[1, 1],
         device_rank=1,
+        start_shards=[0, 1],
+        start_shard_positions=[0, 0],
     )
     x, y = loader()
     assert x.shape == (1, 4, 5)
