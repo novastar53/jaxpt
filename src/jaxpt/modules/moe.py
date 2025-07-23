@@ -150,14 +150,15 @@ class MOE(nnx.Module):
         expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
         return expert_outputs
 
-    def _add_random_noise(self, x):
-        return jax.random.normal(key=self.rngs.gate_noise(), shape=x.shape)
+    def _add_random_noise(self, x, key):
+        return x + jax.random.normal(key=key, shape=x.shape)
 
     def __call__(self, x):
         B, T, C = x.shape
         logits = self.router_gate(x) # B, T, n_experts
         if self.add_noise:
-            logits = jax.vmap(self._add_random_noise)(logits)
+            keys = jax.random.split(self.rngs.gate_noise(), self.n_experts)
+            logits = jax.vmap(self._add_random_noise)(logits, key)
 
         expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         (top_k_probs, 
