@@ -150,14 +150,16 @@ class MOE(nnx.Module):
         expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
         return expert_outputs
 
+    def _add_random_noise(self, x):
+        return jax.random.normal(key=self.rngs.gate_noise(), shape=x.shape)
 
     def __call__(self, x):
         B, T, C = x.shape
         logits = self.router_gate(x) # B, T, n_experts
-        expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         if self.add_noise:
-            logits += jax.random.normal(key=self.rngs.gate_noise(), shape=logits.shape)
+            logits = jax.vmap(self._add_random_noise)(logits)
 
+        expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         (top_k_probs, 
          expert_positions, 
          expert_indices, 
@@ -167,7 +169,7 @@ class MOE(nnx.Module):
         top_k_probs = jax.lax.with_sharding_constraint(top_k_probs, spec)
         expert_positions = jax.lax.with_sharding_constraint(expert_positions, spec)
         expert_indices = jax.lax.with_sharding_constraint(expert_indices, spec)
-        expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
+        expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec) # B, n_experts, expert_cap, C
 
         expert_inputs = expert_inputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
         expert_inputs = jnp.swapaxes(expert_inputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
