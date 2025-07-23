@@ -30,4 +30,4 @@ print(x.device)
 x = jnp.reshape(x, (num_devices, 2*num_devices, 3))
 print(x)
 
-
+print("Success")
