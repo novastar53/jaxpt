@@ -172,17 +172,25 @@ class MOE(nnx.Module):
         expert_indices = jax.lax.with_sharding_constraint(expert_indices, spec)
         expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec) # B, n_experts, expert_cap, C
 
-        expert_inputs = expert_inputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
-        expert_inputs = jnp.swapaxes(expert_inputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
-        expert_inputs = expert_inputs.reshape(-1, C) # B * n_experts * expert_cap, C
+        if B % self.n_experts == 0:
+            expert_inputs = expert_inputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_inputs = jnp.swapaxes(expert_inputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
+        else:
+            expert_inputs = jnp.swapaxes(expert_inputs, 0, 1) # n_experts, B, expert_cap, C
+
+        expert_inputs = expert_inputs.reshape(-1, C) # n_experts * B * expert_cap, C
         expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
         expert_inputs = expert_inputs.reshape(self.n_experts, B * expert_capacity, C) # n_experts, B * expert_cap, C
-        expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
 
         expert_outputs = self.experts(expert_inputs) # n_experts, B * expert_cap, C
-        expert_outputs = expert_outputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
-        expert_outputs = jnp.swapaxes(expert_outputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
-        expert_outputs = expert_outputs.reshape(B, self.n_experts, expert_capacity, C) # B, n_experts, expert_cap, C
+        if B % self.n_experts == 0:
+            expert_outputs = expert_outputs.reshape(self.n_experts, -1, self.n_experts, expert_capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_outputs = jnp.swapaxes(expert_outputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_outputs = expert_outputs.reshape(B, self.n_experts, expert_capacity, C) # B, n_experts, expert_cap, C
+        else:
+            expert_outputs = expert_outputs.reshape(self.n_experts, B, expert_capacity, C) # n_experts, B, expert_cap, C
+            expert_outputs = jnp.swapaxes(expert_outputs, 0, 1) # B, n_experts, expert_cap, C
+
         expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
 
         y_pred = jax.vmap(
