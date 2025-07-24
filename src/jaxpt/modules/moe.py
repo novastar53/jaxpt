@@ -114,13 +114,13 @@ class MOE(nnx.Module):
 
 
     def _get_expert_inputs(self, x, gate_probs, expert_capacity):
-        T, _ = logits.shape
+        T, _ = gate_probs.shape
         _, C = x.shape
-        top_k_probs, expert_indices = jax.lax.top_k(logits, self.top_k) # T, top_K
+        top_k_probs, expert_indices = jax.lax.top_k(gate_probs, self.top_k) # T, top_K
 
         # Swap the sequence (T) and top_k dimensions so that when the array is
         # flattened, the higher ranked experts appear first.
-        expert_indices = jnp.swapaxes(top_k_expert_indices, 0, 1).ravel() # top_K * T
+        expert_indices = jnp.swapaxes(expert_indices, 0, 1).ravel() # top_K * T
         # Calculate the expert buffer positions all the tokens in the batch
         expert_one_hot = jax.nn.one_hot(expert_indices, self.n_experts, dtype=jnp.int32) # top_K * T, n_experts
         expert_positions = (jnp.cumsum(expert_one_hot, axis=0) * expert_one_hot) - 1 # top_K * T, n_experts
@@ -130,7 +130,7 @@ class MOE(nnx.Module):
         # Extract the buffer positions for each token and k, 
         expert_positions = jnp.max(expert_positions, axis=2) # T, top_K
         # Restore the shape and order of expert_indices
-        expert_indices = jnp.swapaxes(top_k_expert_indices.reshape(-1, T), 0, 1) # T, top_K
+        expert_indices = jnp.swapaxes(expert_indices.reshape(-1, T), 0, 1) # T, top_K
 
         zeros = jnp.zeros((self.n_experts, expert_capacity, C)) # n_experts, expert_cap, C
 
@@ -160,7 +160,7 @@ class MOE(nnx.Module):
             noise = jax.random.normal(self.gate_noise_rngstream(), 
                                       gate_logits.shape) * (1/self.n_experts)
             gate_logits += noise
-        gate_probs = jax.nn.softmax(logits)
+        gate_probs = jax.nn.softmax(gate_logits)
 
         expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         (top_k_probs, 
@@ -203,8 +203,7 @@ class MOE(nnx.Module):
 
         if self.aux_loss is True:
             frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T)
-            frac_prob = 
-            
+            return y_pred, 0
         
         return y_pred
 
