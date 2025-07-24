@@ -113,16 +113,14 @@ class MOE(nnx.Module):
         self.gate_noise_rngstream = rngs['gate_noise'].fork()
 
 
-    def _get_expert_inputs(self, x, logits, expert_capacity):
+    def _get_expert_inputs(self, x, gate_probs, expert_capacity):
         T, _ = logits.shape
         _, C = x.shape
-        top_k_logits, expert_indices = jax.lax.top_k(logits, self.top_k) # T, top_K
-        zeros = jnp.full_like(logits, float('-inf')) # T, n_experts
-        expert_probs = jax.nn.softmax(top_k_logits, axis=-1) # T, n_experts  
+        top_k_probs, expert_indices = jax.lax.top_k(logits, self.top_k) # T, top_K
 
         # Swap the sequence (T) and top_k dimensions so that when the array is
         # flattened, the higher ranked experts appear first.
-        expert_indices = jnp.swapaxes(expert_indices, 0, 1).ravel() # top_K * T
+        expert_indices = jnp.swapaxes(top_k_expert_indices, 0, 1).ravel() # top_K * T
         # Calculate the expert buffer positions all the tokens in the batch
         expert_one_hot = jax.nn.one_hot(expert_indices, self.n_experts, dtype=jnp.int32) # top_K * T, n_experts
         expert_positions = (jnp.cumsum(expert_one_hot, axis=0) * expert_one_hot) - 1 # top_K * T, n_experts
@@ -132,7 +130,7 @@ class MOE(nnx.Module):
         # Extract the buffer positions for each token and k, 
         expert_positions = jnp.max(expert_positions, axis=2) # T, top_K
         # Restore the shape and order of expert_indices
-        expert_indices = jnp.swapaxes(expert_indices.reshape(-1, T), 0, 1) # T, top_K
+        expert_indices = jnp.swapaxes(top_k_expert_indices.reshape(-1, T), 0, 1) # T, top_K
 
         zeros = jnp.zeros((self.n_experts, expert_capacity, C)) # n_experts, expert_cap, C
 
@@ -140,7 +138,7 @@ class MOE(nnx.Module):
         expert_inputs = zeros.at[expert_indices.ravel(), 
                                  expert_positions.ravel()].add(x)
 
-        return expert_probs, expert_positions, expert_indices, expert_inputs
+        return top_k_probs, expert_positions, expert_indices, expert_inputs
 
 
     def _collect_outputs(self, expert_outputs, expert_indices, expert_positions, 
@@ -152,19 +150,24 @@ class MOE(nnx.Module):
 
 
     def __call__(self, x):
+        '''
+        Expert routing based on the vmoe implementation: 
+        https://github.com/google-research/vmoe/blob/main/vmoe/nn/routing.py
+        '''
         B, T, C = x.shape
-        logits = self.router_gate(x) # B, T, n_experts
+        gate_logits = self.router_gate(x) # B, T, n_experts
         if self.add_noise:
             noise = jax.random.normal(self.gate_noise_rngstream(), 
-                                      logits.shape) * (1/self.n_experts)
-            logits += noise
+                                      gate_logits.shape) * (1/self.n_experts)
+            gate_logits += noise
+        gate_probs = jax.nn.softmax(logits)
 
         expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         (top_k_probs, 
          expert_positions, 
          expert_indices, 
          expert_inputs) = jax.vmap(
-            lambda x, l: self._get_expert_inputs(x, l, expert_capacity))(x, logits) # B, n_experts, expert_cap, C 
+            lambda x, l: self._get_expert_inputs(x, l, expert_capacity))(x, gate_probs) # B, n_experts, expert_cap, C 
         
         top_k_probs = jax.lax.with_sharding_constraint(top_k_probs, spec)
         expert_positions = jax.lax.with_sharding_constraint(expert_positions, spec)
@@ -199,10 +202,9 @@ class MOE(nnx.Module):
         y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
 
         if self.aux_loss is True:
-            frac = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (B * T)
-            ideal = self.top_k / self.n_experts
-            aux_loss = self.n_experts * jnp.sum((frac - ideal) ** 2)
-            return y_pred, aux_loss
+            frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T)
+            frac_prob = 
+            
         
         return y_pred
 
