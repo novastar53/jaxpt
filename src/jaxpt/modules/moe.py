@@ -110,7 +110,7 @@ class MOE(nnx.Module):
         self.load_factor = config.load_factor
         self.add_noise = False
         self.aux_loss = False
-        self.rngs = rngs
+        self.gate_noise_rngstream = rngs['gate_noise'].fork()
 
 
     def _get_expert_inputs(self, x, logits, expert_capacity):
@@ -150,15 +150,14 @@ class MOE(nnx.Module):
         expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
         return expert_outputs
 
-    def _add_random_noise(self, x, key):
-        return x + jax.random.normal(key=key, shape=x.shape)
 
     def __call__(self, x):
         B, T, C = x.shape
         logits = self.router_gate(x) # B, T, n_experts
         if self.add_noise:
-            keys = jax.random.split(self.rngs.gate_noise(), self.n_experts)
-            logits = jax.vmap(self._add_random_noise)(logits, key)
+            noise = jax.random.normal(self.gate_noise_rngstream(), 
+                                      logits.shape) * (1/self.n_experts)
+            logits += noise
 
         expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
         (top_k_probs, 
