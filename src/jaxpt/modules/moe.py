@@ -203,7 +203,10 @@ class MOE(nnx.Module):
 
         if self.aux_loss is True:
             frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T)
-            return y_pred, 0
+            frac_router_probs = jnp.sum(gate_probs, axis=(0, 1)) / (2 * B * T)
+            aux_loss = jnp.dot(frac_tokens, frac_router_probs) * self.n_experts
+
+            return y_pred, aux_loss
         
         return y_pred
 
