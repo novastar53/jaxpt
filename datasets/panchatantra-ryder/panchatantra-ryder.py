@@ -7,7 +7,7 @@ import numpy as np
 
 
 if __name__ == "__main__":
-    fpath = os.path.join(Path(), "data", "panchatantra-ryder.txt")
+    fpath = os.path.join(Path(), "data", "panchatantra-ryder-clean.txt")
     with open(fpath, "r") as f:
         txt = f.read()
         enc = tiktoken.get_encoding("gpt2")
