@@ -76,6 +76,7 @@ def generate_completions(
     prefix="Hello, I'm a language model,",
     num_completions=8,
     max_length=20,
+    temperature=0.2,
     key=None,
 ):
     if enc is None:
@@ -84,7 +85,7 @@ def generate_completions(
         key = jax.random.PRNGKey(1337)
 
     generate_completion = partial(
-        generate_slow, model, key=key, max_length=max_length
+        generate_slow, model, key=key, max_length=max_length, temperature=temperature
     )
     tokens = enc.encode(prefix)
     tokens = jnp.array(tokens, dtype=jnp.int32)

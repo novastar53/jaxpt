@@ -132,11 +132,11 @@ class MOE(nnx.Module):
         # Restore the shape and order of expert_indices
         expert_indices = jnp.swapaxes(expert_indices.reshape(-1, T), 0, 1) # T, top_K
 
-        zeros = jnp.zeros((self.n_experts, expert_capacity, C)) # n_experts, expert_cap, C
+        zeros = jnp.zeros((self.n_experts, expert_capacity, C), dtype=x.dtype) # n_experts, expert_cap, C
 
         x = jnp.repeat(x, self.top_k, axis=0)
         expert_inputs = zeros.at[expert_indices.ravel(), 
-                                 expert_positions.ravel()].add(x)
+                                 expert_positions.ravel()].set(x)
 
         return top_k_probs, expert_positions, expert_indices, expert_inputs
 
@@ -162,7 +162,7 @@ class MOE(nnx.Module):
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 
-        expert_capacity = int((1.2 * self.top_k * T ) // self.n_experts)
+        expert_capacity = int(self.top_k * T)
         (top_k_probs, 
          expert_positions, 
          expert_indices, 

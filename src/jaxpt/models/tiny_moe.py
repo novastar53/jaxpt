@@ -214,9 +214,13 @@ class Tiny_MoE(nnx.Module):
     def from_checkpoint(
         fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config]
     ):
+    
+        default = jax.random.key(1337)
+        gate_noise = jax.random.key(42)
+        rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
         config = config if config else Tiny_MoE_Config()
-        abstract_model = nnx.eval_shape(
-            lambda: Tiny_MoE(config=config, rngs=rngs)
+        abstract_model = nnx.eval_shape( 
+            lambda: Tiny_MoE(config=config, rngs=nnx.Rngs(default=default, gate_noise=gate_noise))
         )
         graphdef, rngstate, other_state = nnx.split(
             abstract_model, nnx.RngState, ...
@@ -224,4 +228,7 @@ class Tiny_MoE(nnx.Module):
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
         model = nnx.merge(graphdef, rngstate, other_state)
+        for i in range(len(model.h)):
+            if hasattr(model.h[i], "moe"):
+                model.h[i].moe.gate_noise_rngstream = rngs["gate_noise"].fork()
         return model
