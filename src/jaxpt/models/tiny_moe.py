@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
 from jaxpt.modules.config import Config
-from jaxpt.modules.attention import GQ_Attention, GQ_Attention_w_RoPE
+from jaxpt.modules.attention import GQ_Attention_w_RoPE
 from jaxpt.modules.mlp import GLU, MLP
 from jaxpt.modules.moe import MOE
 from jaxpt.modules.position import (
@@ -80,7 +80,7 @@ class GLU_Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention(config, rngs=rngs)
+        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -115,7 +115,7 @@ class MOE_Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention(config, rngs=rngs)
+        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -158,19 +158,6 @@ class Tiny_MoE(nnx.Module):
             rngs=rngs,
         )
 
-        self.wpe = nnx.Embed(
-            config.block_size,
-            config.n_embed,
-            embedding_init=nnx.with_partitioning(
-                nnx.initializers.normal(stddev=config.init_stddev,
-                dtype=config.param_dtype),
-                getattr(config, "embed_partition_spec", (None,))
-            ),
-            dtype=config.dtype,
-            param_dtype=config.param_dtype,
-            rngs=rngs,
-        )
-
         # pre-calculate the RoPE thetas
         omega = calc_rope_omega_llama(
             config.n_embed,
@@ -201,11 +188,7 @@ class Tiny_MoE(nnx.Module):
         self.n_layer = config.n_layer
 
     def __call__(self, idx, mask=None):
-        B, T = idx.shape
-        pos = jnp.arange(0, T, dtype=jnp.uint16)
-        x_pos = self.wpe(pos)
         x = self.wte(idx)
-        x = x + x_pos
         total_aux_loss = 0
         for i in range(0, self.n_layer, 2):
             if self.aux_loss is True:
