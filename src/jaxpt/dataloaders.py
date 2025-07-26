@@ -237,6 +237,7 @@ class BlendedCloudDataLoader():
         self.T = block_size
         self.D = device_rank
         batch_sizes = self._calc_batch_sizes(batch_size, proportions)
+        print(f"Initializing blended dataset with batch sizes: {batch_sizes}")
         self.dataloaders = []
         n = len(bucket_names)
         # Default to zeros if not provided
