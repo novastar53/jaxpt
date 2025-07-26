@@ -136,7 +136,7 @@ class MOE(nnx.Module):
 
         x = jnp.repeat(x, self.top_k, axis=0)
         expert_inputs = zeros.at[expert_indices.ravel(), 
-                                 expert_positions.ravel()].set(x)
+                                 expert_positions.ravel()].set(x) # TDOO: This will overwrite tokens if expert capacity is exceeded. 
 
         return top_k_probs, expert_positions, expert_indices, expert_inputs
 
@@ -162,7 +162,7 @@ class MOE(nnx.Module):
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 
-        expert_capacity = int(self.top_k * T)
+        expert_capacity = int(1.2 * self.top_k * T // self.n_experts)
         (top_k_probs, 
          expert_positions, 
          expert_indices, 
