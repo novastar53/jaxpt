@@ -33,6 +33,7 @@ class Tiny_MoE_Config(Config):
     mesh: jax.sharding.Mesh = None  # device mesh
     top_k: int = 2  # number of top experts to use
     load_factor = 1.1 # load factor for expert buffers
+    expert_weight_priority = True # sort expert buffer assignments by expert weight 
     aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
     n_mlp_hidden: int = 2304  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers

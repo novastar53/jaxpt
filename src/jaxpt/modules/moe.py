@@ -108,6 +108,7 @@ class MOE(nnx.Module):
         self.top_k = config.top_k
         self.n_experts = config.n_experts
         self.load_factor = config.load_factor
+        self.expert_weight_priority = config.expert_weight_priority
         self.add_noise = False
         self.aux_loss = False
         self.gate_noise_rngstream = rngs['gate_noise'].fork()
@@ -117,6 +118,11 @@ class MOE(nnx.Module):
         T, _ = gate_probs.shape
         _, C = x.shape
         top_k_probs, expert_indices = jax.lax.top_k(gate_probs, self.top_k) # T, top_K
+
+        if self.expert_weight_priority:
+            # prioritize expert assignment by expert probs rather than than sequence order
+            batch_order = jnp.argsort(top_k_probs[:, 0], descending=True)
+            expert_indices = expert_indices[batch_order]
 
         # Swap the sequence (T) and top_k dimensions so that when the array is
         # flattened, the higher ranked experts appear first.
@@ -137,6 +143,11 @@ class MOE(nnx.Module):
         x = jnp.repeat(x, self.top_k, axis=0)
         expert_inputs = zeros.at[expert_indices.ravel(), 
                                  expert_positions.ravel()].set(x) # TDOO: This will overwrite tokens if expert capacity is exceeded. 
+
+        if self.expert_weight_priority:
+            original_order = jnp.argsort(batch_order)
+            expert_indices = expert_indices[original_order]        
+            expert_positions = expert_positions[original_order]
 
         return top_k_probs, expert_positions, expert_indices, expert_inputs
 
@@ -162,7 +173,7 @@ class MOE(nnx.Module):
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 
-        expert_capacity = int(1.2 * self.top_k * T // self.n_experts)
+        expert_capacity = int(self.load_factor * self.top_k * T // self.n_experts)
         (top_k_probs, 
          expert_positions, 
          expert_indices, 
@@ -204,7 +215,6 @@ class MOE(nnx.Module):
         if self.aux_loss is True:
             frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T)
             frac_router_probs = jnp.sum(gate_probs, axis=(0, 1)) / (B * T)
-            #aux_loss = jnp.dot(frac_tokens, frac_router_probs) * self.n_experts
             aux_loss = jnp.sum(frac_tokens * frac_router_probs) * self.n_experts
 
             return y_pred, aux_loss
