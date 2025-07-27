@@ -30,6 +30,7 @@ print(f"Running on {platform}")
 
 from pathlib import Path
 import sys
+sys.stdout.flush()
 
 jaxpt_dir = str(Path().absolute().parent / "src" )
 
@@ -108,15 +109,9 @@ if device == "tpu":
 
 mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
 
-# Test the device
-A = jnp.array(np.random.normal(size=(4096, 4096)), dtype=jnp.float32) # Make sure matmul is fast
-get_ipython().run_line_magic('timeit', '(A@A).block_until_ready()')
-
-
 # ### Initialize the model and perform a sanity check
 
 # In[4]:
-
 
 from datetime import datetime
 import random
@@ -185,7 +180,6 @@ with mesh:
     print(f"Parameter Count: {total_params:,}")
     print(f"MOE Parameter Count: {moe_params:,}")
     print(f"Replicated Parameter Count: {total_params - moe_params:,}")
-    nnx.display(state)
 
     #tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
     #enc = tiktoken.get_encoding("gpt2")
@@ -200,7 +194,6 @@ with mesh:
 # ### Configure Training Run
 
 # In[7]:
-
 
 import orbax.checkpoint as ocp
 
@@ -245,7 +238,7 @@ class TrainerConfig:
   num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 16 * num_devices
   T: int = 128
-  max_steps: int = int((146776*2000) // (2**11))
+  max_steps: int = int((146776*2) // (2**11))
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
@@ -386,7 +379,7 @@ print(f"Log directory: {log_dir}")
 
 train_losses = []
 append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "time", "tokens_processed", "tokens_per_sec"])
-print(f"Starting from step: {optimizer.step}")
+print(f"Starting from step: {optimizer.step.value.item()}")
 
 
 # In[11]:
@@ -452,14 +445,12 @@ with mesh:
         save_optimizer_state(optimizer)
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
+  finally:
+    plt.figure(figsize=(5, 3))
+    plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
+    plt.legend()
+    plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
 
-  plt.figure(figsize=(5, 3))
-  plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
-  plt.legend()
-  plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
-
-
-# In[12]:
-
-save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-save_optimizer_state(optimizer)
+    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
+    save_optimizer_state(optimizer)
+    print("Done.")
