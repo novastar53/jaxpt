@@ -8,7 +8,9 @@ def save_checkpoint(m, output_dir, run_dirname, step):
         output_dir / m.config.name / "checkpoints" / run_dirname
     )
     checkpoint_dirpath.mkdir(parents=True, exist_ok=True)
-    m.save_checkpoint(checkpoint_dirpath / f"checkpoint-{step}.pt")
+    checkpoint_path = checkpoint_dirpath / f"checkpoint-{step}.pt"
+    print(f"Saving model checkpoint to {checkpoint_path}")
+    m.save_checkpoint(checkpoint_path)
 
 
 def load_checkpoint(model, output_dir, config, run_dirname, step, rngs):

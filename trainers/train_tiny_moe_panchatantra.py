@@ -140,7 +140,7 @@ from flax import nnx
 
 
 # In[6]:
-
+from pprint import pprint
 
 from jaxpt.infer import generate_completions, generate
 from jaxpt.models import Tiny_MoE_Config, Tiny_MoE
@@ -165,7 +165,7 @@ config = Tiny_MoE_Config(
                      n_embed=576,
                      n_mlp_hidden=1536,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
-nnx.display(config)
+pprint(config)
 
 with mesh:
     m = create_sharded_model(Tiny_MoE, config, rngs)
@@ -311,11 +311,7 @@ weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_
 
 
 print(f"weight decay param count: {weight_decay_param_count:,}")
-
-print(f"tokens/batch: {trconf.num_tokens_per_batch:,}")
-print(f"block size: {trconf.T}")
-print(f"batch size: {trconf.mB}")
-print(f"no. gradient accumulation steps: {trconf.grad_accumulation_steps}")
+pprint(trconf)
 print(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
 print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trconf.mB // num_devices)
 print(f"max steps: {trconf.max_steps:,}")

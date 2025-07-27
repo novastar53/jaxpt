@@ -2,16 +2,11 @@
 # coding: utf-8
 
 # # Let's Train Tiny MoE
-# 
-# 
-# 
-# 
 
 # ### Configure the machine and install packages
 # 
 
 # In[1]:
-
 
 from typing import Literal
 import os
@@ -110,13 +105,7 @@ if device == "tpu":
 
 # Set up device mesh
 
-
 mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
-
-# Test the device
-A = jnp.array(np.random.normal(size=(4096, 4096)), dtype=jnp.float32) # Make sure matmul is fast
-get_ipython().run_line_magic('timeit', '(A@A).block_until_ready()')
-
 
 # ### Initialize the model and perform a sanity check
 
@@ -153,6 +142,7 @@ print(f"{output_dir=}")
 
 
 from flax import nnx
+from pprint import pprint
 
 from jaxpt.infer import generate_completions, generate
 from jaxpt.models import Tiny_MoE_Config, Tiny_MoE
@@ -172,7 +162,7 @@ config = Tiny_MoE_Config(dtype=jnp.bfloat16, \
                      n_embed=576,
                      n_mlp_hidden=1536,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
-nnx.display(config)
+pprint(config)
 
 with mesh:
     m = create_sharded_model(Tiny_MoE, config, rngs)
@@ -191,7 +181,6 @@ with mesh:
     print(f"Active Parameter Count: {active_params:,}")
     fraction_of_active_params = active_params / total_params
     print(f"% Active Parameters: {fraction_of_active_params*100:0.2f} %")
-    nnx.display(state)
 
     #enc = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
     #completions = generate_completions(m, enc=enc, num_completions=8,
@@ -204,6 +193,30 @@ with mesh:
 # ### Configure Training Run
 
 # In[ ]:
+
+import orbax.checkpoint as ocp
+
+def save_optimizer_state(optimizer):
+  state_dirpath = (
+    output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname
+  )
+  state_dirpath.mkdir(parents=True, exist_ok=True)
+  _, state = nnx.split(optimizer)
+  state.model = None
+  cp = ocp.StandardCheckpointer()
+  print(f"Saving optimizer state to {state_dirpath}/step-{optimizer.step.value.item()}")
+  cp.save(state_dirpath / f"step-{optimizer.step.value.item()}", state)
+  cp.wait_until_finished()
+
+def load_optimizer_state(model, optimizer, run_dirname, step):
+  cp = ocp.StandardCheckpointer()
+  graphdef, state = nnx.split(optimizer)
+  state_model = state.model
+  state.model = None
+  state = cp.restore(output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname / f"step-{step}", target=state)
+  state.model = state_model
+  optimizer = nnx.merge(graphdef, state)
+  return optimizer
 
 
 import dataclasses
@@ -298,13 +311,9 @@ weight_decay_params = jax.tree_util.tree_map(f, weight_decay_mask, params)
 weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_decay_params, 0)
 
 print(f"weight decay param count: {weight_decay_param_count:,}")
-print(f"tokens/batch: {trconf.num_tokens_per_batch:,}")
-print(f"block size: {trconf.T}")
-print(f"batch size: {trconf.mB}")
-print(f"no. gradient accumulation steps: {trconf.grad_accumulation_steps}")
+pprint(trconf)
 print(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
 print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trconf.mB // num_devices)
-print(f"max steps: {trconf.max_steps:,}")
 
 
 # ### DataLoader and Validation Setup
@@ -419,18 +428,16 @@ with mesh:
       if step % trconf.eval_interval == 0:
         save_checkpoint(m, output_dir, run_dirname, step)
       step += 1
-
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
+  finally:
+    plt.figure(figsize=(7, 5))
+    plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
+    plt.yticks(ticks=np.arange(0, 12, 0.5))
+    plt.grid()
+    plt.legend()
+    plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
 
-  plt.figure(figsize=(7, 5))
-  plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
-  plt.yticks(ticks=np.arange(0, 12, 0.5))
-  plt.grid()
-  plt.legend()
-  plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
-
-
-# In[ ]:
-
-save_checkpoint(m, output_dir, run_dirname, step)
+    save_checkpoint(m, output_dir, run_dirname, step)
+    save_optimizer_state(optimizer)
+    print("Done.")
