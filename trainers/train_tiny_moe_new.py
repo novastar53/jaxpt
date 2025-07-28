@@ -35,7 +35,7 @@ import sys
 jaxpt_dir = str(Path().absolute().parent / "src" )
 
 sys.path.append(jaxpt_dir)
-print(jaxpt_dir)
+print(f"Jaxpt dir {jaxpt_dir}")
 
 
 # In[3]:
@@ -168,6 +168,8 @@ config = Tiny_MoE_Config(
                      n_kv_head=3,
                      n_embed=576,
                      n_mlp_hidden=1536,
+                     expert_weight_priority=False,
+                     load_factor=1.25,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
@@ -321,7 +323,7 @@ print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trc
 
 import os
 
-from jaxpt.dataloaders import DataLoader, HuggingfaceDataLoader, CloudDataLoader
+from jaxpt.dataloaders import BlendedCloudDataLoader, CloudDataLoader
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 '''
