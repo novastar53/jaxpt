@@ -1,4 +1,8 @@
+import os
+from pathlib import Path
+
 import jax
+import flax
 import jax.numpy as jnp
 import flax.nnx as nnx
 from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config 
@@ -10,9 +14,33 @@ from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
 from lighteval.models.transformers.transformers_model import (
     TransformersModelConfig,
 )
+from jaxpt.checkpointers import save_checkpoint, load_checkpoint, load_checkpoint_from_gcloud
 from lighteval.logging.evaluation_tracker import EvaluationTracker
 import argparse
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
+
+# Hardware setup
+print("JAX version:", jax.__version__)
+print("Flax version", flax.__version__)
+
+devices = jax.devices()
+num_devices = len(devices)
+print("Available devices:", num_devices)
+
+requested_device = "gpu"
+
+jax.config.update("jax_platform_name", requested_device) # Make sure we're using the GPU
+
+device = jax.default_backend()
+if device != requested_device:
+    warnings.warn(f"not using {requested_device}. Using {device}")
+else:
+    print(f"using {device}")
+
+output_dir = Path("/workspace/alpha_training_runs") 
+
+mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -63,23 +91,24 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # key = jax.random.PRNGKey(1337)
-    # rngs = nnx.Rngs(key)
-    # config = MobileLLM_Config(dtype=jnp.float16, \
-    #                    vocab_size=49152,
-    #                    n_embed=576,
-    #                    n_head=9,
-    #                    n_kv_head=3,
-    #                    n_mlp_hidden=1536,
-    #                    sdpa_implementation="xla")
-
-    flax_model = Tiny_MoE(Tiny_MoE_Config(), nnx.Rngs(0))
-    # hf_model = convert_to_hf(flax_model)
-    # hf_tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
-    #hf_model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    default = jax.random.key(1337)
+    gate_noise = jax.random.key(42)
+    rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
+    config = Tiny_MoE_Config(dtype=jnp.bfloat16, \
+                        #vocab_size=49152,
+                        n_layer=30,
+                        block_size=1024,
+                        n_head=9,
+                        n_kv_head=3,
+                        n_mlp_hidden=1536,
+                        sdpa_implementation="cudnn" if device=="gpu" else "xla")
+    nnx.display(config)
+    with mesh:
+        flax_model = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250722_uhixrg", 20000, rngs)
+        #flax_model = create_sharded_model(Tiny_MoE, config, rngs)
 
     model_cfg = TransformersModelConfig(
-        model_name="HuggingFaceTB/SmolLM-135M",
+        model_name="HuggingFaceTB/SmolLM-360M",
         dtype="float32",
         add_special_tokens=True,
         max_length=2048,
