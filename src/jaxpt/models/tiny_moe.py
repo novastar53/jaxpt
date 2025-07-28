@@ -213,7 +213,7 @@ class Tiny_MoE(nnx.Module):
 
     @staticmethod
     def from_checkpoint(
-        fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config]
+        fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config], sharding: Optional[jax.sharding.NamedSharding]
     ):
     
         default = jax.random.key(1337)
@@ -226,6 +226,8 @@ class Tiny_MoE(nnx.Module):
         graphdef, rngstate, other_state = nnx.split(
             abstract_model, nnx.RngState, ...
         )
+        #pspecs = nnx.get_partition_spec(other_state)
+        #sharded_state = nnx.with_sharding_constraint(other_state, pspecs)
         checkpointer = ocp.StandardCheckpointer()
         other_state = checkpointer.restore(fpath, target=other_state)
         model = nnx.merge(graphdef, rngstate, other_state)
