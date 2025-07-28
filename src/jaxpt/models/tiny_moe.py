@@ -233,5 +233,6 @@ class Tiny_MoE(nnx.Module):
         model = nnx.merge(graphdef, rngstate, other_state)
         for i in range(len(model.h)):
             if hasattr(model.h[i], "moe"):
-                model.h[i].moe.gate_noise_rngstream = rngs["gate_noise"].fork()
+                #model.h[i].moe.gate_noise_rngstream = rngs["gate_noise"].fork()
+                model.h[i].moe.gate_noise_rngstream = rngs.gate_noise # TODO: Temporary fix for backward compatibility with jax 0.5.2
         return model

@@ -13,7 +13,6 @@ dependencies = [
     "debugpy>=1.8.14",
     "english-words>=2.0.1",
     "flash-attention-jax>=0.3.1",
-    "flax==0.10.7",
     "google-cloud-storage>=3.1.0",
     "huggingface>=0.0.1",
     "ipykernel>=6.29.5",
@@ -31,13 +30,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-#eval = [
-#    "torch==2.7.1",
-#    "lighteval[math]>=0.10.0",
-#]
+eval = [
+    "torch==2.7.1",
+    "lighteval[math]>=0.10.0",
+]
 cuda = [
-    "jax[cuda12]==0.6.2",
-    #"jax[cuda12]==0.5.2",
+    #"jax[cuda12]==0.6.2",
+    "jax[cuda12]==0.5.2",
+    #"flax==0.10.7",
+    "flax==0.10.6",
 ]
 metal = [
     "jax>=0.5.2",
