@@ -174,9 +174,9 @@ config = Tiny_MoE_Config(
 pprint(config)
 
 with mesh:
-    m = create_sharded_model(Tiny_MoE, config, rngs)
+    #m = create_sharded_model(Tiny_MoE, config, rngs)
     #m = load_checkpoint(Tiny_MoE, output_dir, config, "run_20250726_excudate_quilling", 2680, rngs)
-    #m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250727_chalina_nassidae", "16750", rngs)
+    m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
     #m = from_hf_pretrained(config, rngs)
 
     graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
@@ -233,7 +233,7 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(236e9)
+  num_tokens: int = int(173e9)
   num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 32 * num_devices
   T: int = 2048
@@ -307,9 +307,8 @@ def f(x, y):
 
 weight_decay_params = jax.tree_util.tree_map(f, weight_decay_mask, params)
 weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_decay_params, 0)
-
-
 print(f"weight decay param count: {weight_decay_param_count:,}")
+pprint(trconf)
 print(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
 print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trconf.mB // num_devices)
 
@@ -345,6 +344,7 @@ train_dl = BlendedCloudDataLoader(
     "smollm-corpus/processed/python-edu",
     "smollm-corpus/processed/cosmopedia-v2"],
     proportions=[85, 1, 12],
+    start_shards=[545, 7, 76],
     label="train"
 )
 
@@ -427,7 +427,7 @@ with mesh:
       if step > 0 and step % trconf.checkpoint_interval == 0:
         print(f"Saving checkpoint at step {step}")
         save_checkpoint(m, output_dir, run_dirname, step)
-        save_optimizer_state(optimizer)
+        #save_optimizer_state(optimizer)
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
   finally:

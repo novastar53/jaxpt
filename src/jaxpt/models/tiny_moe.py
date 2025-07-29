@@ -213,7 +213,7 @@ class Tiny_MoE(nnx.Module):
 
     @staticmethod
     def from_checkpoint(
-        fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config], sharding: Optional[jax.sharding.NamedSharding]
+        fpath: str, rngs: nnx.Rngs, config: Optional[Tiny_MoE_Config] = None, sharding: Optional[jax.sharding.NamedSharding] = None
     ):
     
         default = jax.random.key(1337)
