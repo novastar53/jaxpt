@@ -1,3 +1,7 @@
+import os
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
+
 from pathlib import Path
 
 import jax
@@ -52,7 +56,7 @@ def parse_args():
     parser.add_argument(
         "--tasks",
         type=str,
-        #default="lighteval|arc:easy|0|0", #leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
+        #default="lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
         default="leaderboard|hellaswag|0|0",
         help="Comma-separated list of tasks to run",
     )
@@ -78,10 +82,9 @@ def main():
                         sdpa_implementation="xla")
 
     output_dir = Path("/workspace/").absolute()
-    flax_model = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
-    hf_model = convert_to_hf(flax_model)
-    #hf_tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
-    #hf_model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    #m = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
+    #m = convert_to_hf(m)
+    m = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
 
     model_cfg = TransformersModelConfig(
         model_name="HuggingFaceTB/SmolLM-135M",
@@ -108,7 +111,7 @@ def main():
         tasks=",".join(tasks),
         pipeline_parameters=params,
         evaluation_tracker=tracker,
-        model=hf_model,
+        model=m,
         model_config=model_cfg,
     )
 
