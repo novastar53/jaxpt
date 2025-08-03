@@ -9,6 +9,8 @@ description = "GPT models built with Jax"
 readme = "README.md"
 requires-python = "==3.12.8"
 dependencies = [
+    "google-cloud-storage>=3.1.0",
+    "english-words>=2.0.1",
     "flash-attention-jax>=0.3.1",
     "numpy==1.26.4",
 ]
@@ -34,7 +36,6 @@ tpu = [
     "cloud-tpu-client",
 ]
 dev = [
-    "english-words>=2.0.1",
     "datasets>=3.3.2",
     "tiktoken>=0.9.0",
     "transformers>=4.49.0",
@@ -44,7 +45,6 @@ dev = [
     "nltk>=3.9.1",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.0",
-    "google-cloud-storage>=3.1.0",
     "ipykernel>=6.29.5",
     "huggingface>=0.0.1",
     "pytest>=8.0.0",
