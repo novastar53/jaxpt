@@ -9,28 +9,13 @@ description = "GPT models built with Jax"
 readme = "README.md"
 requires-python = "==3.12.8"
 dependencies = [
-    "datasets>=3.3.2",
-    "debugpy>=1.8.14",
-    "english-words>=2.0.1",
     "flash-attention-jax>=0.3.1",
-    "google-cloud-storage>=3.1.0",
-    "huggingface>=0.0.1",
-    "ipykernel>=6.29.5",
-    "jupyter>=1.1.1",
-    "matplotlib>=3.10.0",
-    "nltk>=3.9.1",
     "numpy==1.26.4",
-    "pydantic>=2.11.4",
-    "requests>=2.32.3",
-    "seaborn[dev]>=0.13.2",
-    "tensorflow>=2.19.0",
-    "tensorflow-datasets>=4.9.8",
-    "tiktoken>=0.9.0",
-    "transformers>=4.49.0",
 ]
 
 [project.optional-dependencies]
 eval = [
+    "requests>=2.32.3",
     "torch==2.7.1",
     "lighteval[math]>=0.10.0",
 ]
@@ -42,12 +27,26 @@ cuda = [
 ]
 metal = [
     "jax>=0.5.2",
+    "flax==0.10.6",
 ]
 tpu = [
     "libtpu",
     "cloud-tpu-client",
 ]
 dev = [
+    "english-words>=2.0.1",
+    "datasets>=3.3.2",
+    "tiktoken>=0.9.0",
+    "transformers>=4.49.0",
+    "seaborn[dev]>=0.13.2",
+    "tensorflow>=2.19.0",
+    "tensorflow-datasets>=4.9.8",
+    "nltk>=3.9.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.0",
+    "google-cloud-storage>=3.1.0",
+    "ipykernel>=6.29.5",
+    "huggingface>=0.0.1",
     "pytest>=8.0.0",
     "ipykernel>=6.29.5",
     "ruff>=0.2.0",

@@ -52,7 +52,8 @@ def parse_args():
     parser.add_argument(
         "--tasks",
         type=str,
-        default="lighteval|arc:easy|0|0", #leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
+        #default="lighteval|arc:easy|0|0", #leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
+        default="leaderboard|hellaswag|0|0",
         help="Comma-separated list of tasks to run",
     )
     parser.add_argument(
@@ -84,9 +85,10 @@ def main():
 
     model_cfg = TransformersModelConfig(
         model_name="HuggingFaceTB/SmolLM-135M",
-        dtype="float32",
+        dtype="bfloat16",
         add_special_tokens=True,
         max_length=2048,
+        batch_size=16,
     )
 
     tracker = EvaluationTracker(
