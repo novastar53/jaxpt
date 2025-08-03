@@ -111,8 +111,8 @@ class MOE(nnx.Module):
         self.expert_weight_priority = config.expert_weight_priority
         self.add_noise = False
         self.aux_loss = False
-        self.gate_noise_rngstream = rngs['gate_noise'].fork()
-        #self.gate_noise_rngstream = rngs.gate_noise # TODO: Temporary fix for backward compatibility with Jax version 0.5.2
+        #self.gate_noise_rngstream = rngs['gate_noise'].fork()
+        self.gate_noise_rngstream = rngs.gate_noise # TODO: Temporary fix for backward compatibility with Jax version 0.5.2
 
 
     def _get_expert_inputs(self, x, gate_probs, expert_capacity):
