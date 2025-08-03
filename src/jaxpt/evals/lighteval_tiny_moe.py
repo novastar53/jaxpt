@@ -12,18 +12,16 @@ import flax.nnx as nnx
 
 from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config
 from jaxpt.checkpointers import load_checkpoint_from_gcloud
+from jaxpt.utils import count_params
 
 from transformers import AutoTokenizer
-
-from lighteval.models.abstract_model import LightevalModel
+from lighteval.models.abstract_model import LightevalModel, ModelInfo
 from lighteval.models.model_output import (
     Batch,
     ModelResponse,
 )
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
-from lighteval.models.transformers.transformers_model import (
-    TransformersModelConfig,
-)
+from lighteval.models.custom.custom_model import CustomModelConfig
 from lighteval.logging.evaluation_tracker import EvaluationTracker
 
 
@@ -49,10 +47,31 @@ mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
 class Lighteval_Tiny_MoE(LightevalModel):
     def __init__(self, config):
         self.config = config
-        self.model = self._create_model(config) 
+        config = Tiny_MoE_Config(
+                        name="Tiny_MoE",
+                        dtype=jnp.bfloat16, \
+                        vocab_size=49152,
+                        n_layer=30,
+                        block_size=2048,
+                        n_head=9,
+                        n_kv_head=3,
+                        n_mlp_hidden=1536,
+                        expert_weight_priority=False,
+                        load_factor=2.0,
+                        sdpa_implementation="cudnn" if device=="gpu" else "xla")
+        with mesh:
+            self.model = self._create_model(config) 
         self._tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")
         self._add_special_tokens = False
         self._max_length = config.block_size
+
+        self.model_info = ModelInfo(
+            model_name=config.name,
+            model_sha="",
+            model_dtype=config.dtype,
+            model_size=count_params(self.model) * 2,
+        )
+
 
     def _create_model(self, config):
         key = jax.random.PRNGKey(1337)
@@ -163,18 +182,10 @@ def main():
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 
     output_dir = Path("/workspace/").absolute()
-    with mesh:
-        m = Lighteval_Tiny_MoE(config)
-        #m = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
-        #m = convert_to_hf(m)
-        #m = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
 
-    model_cfg = TransformersModelConfig(
+    model_cfg = CustomModelConfig(
         model_name="Tiny_MoE",
-        dtype="bfloat16",
-        add_special_tokens=True,
-        max_length=2048,
-        batch_size=16,
+        model_definition_file_path=str(Path().absolute() / "src" / "jaxpt"/ "evals" / "lighteval_tiny_moe.py")
     )
 
     tracker = EvaluationTracker(
@@ -194,7 +205,6 @@ def main():
         tasks=",".join(tasks),
         pipeline_parameters=params,
         evaluation_tracker=tracker,
-        model=m,
         model_config=model_cfg,
     )
 
