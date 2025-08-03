@@ -115,56 +115,11 @@ class Lighteval_Tiny_MoE(LightevalModel):
         pass
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run LightEval evaluation pipeline"
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="results/",
-        help="Directory to write JSON/parquet results",
-    )
-    parser.add_argument(
-        "--save_details",
-        action="store_true",
-        help="Include per-sample logs in output",
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload results to the Hugging Face Hub",
-    )
-    parser.add_argument(
-        "--max_samples",
-        type=int,
-        default=None,
-        help="Limit the total number of examples to evaluate",
-    )
-    parser.add_argument(
-        "--launcher_type",
-        type=str,
-        default=ParallelismManager.ACCELERATE,
-        help="Parallelism launcher type (e.g., ACCELERATE)",
-    )
-    parser.add_argument(
-        "--tasks",
-        type=str,
-        #default="lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
-        default="leaderboard|hellaswag|0|0",
-        help="Comma-separated list of tasks to run",
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        help="Pretrained model identifier or path for TransformersModelConfig",
-    )
-    return parser.parse_args()
-
 
 
 def main():
-    args = parse_args()
+    #tasks = "lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0"
+    tasks = "leaderboard|hellaswag|0|0"
 
     key = jax.random.PRNGKey(1337)
     rngs = nnx.Rngs(key)
@@ -191,12 +146,10 @@ def main():
     tracker = EvaluationTracker(
         output_dir=args.output_dir,
         save_details=args.save_details,
-        push_to_hub=args.push_to_hub,
     )
 
     params = PipelineParameters(
-        launcher_type=args.launcher_type,
-        max_samples=args.max_samples,
+        launcher_type=ParallelismManager.CUSTOM,
     )
 
     tasks = args.tasks.split(",")
