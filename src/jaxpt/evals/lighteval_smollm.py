@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
-from jaxpt.models.mobile_llm import SmolLM, SmolLM_Config, convert_to_hf
+from jaxpt.models.smol_lm import SmolLM, SmolLM_Config, convert_to_hf
+from jaxpt.checkpointers import load_checkpoint_from_gcloud
 
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -49,7 +52,7 @@ def parse_args():
     parser.add_argument(
         "--tasks",
         type=str,
-        default="lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
+        default="lighteval|arc:easy|0|0", #leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
         help="Comma-separated list of tasks to run",
     )
     parser.add_argument(
@@ -72,7 +75,8 @@ def main():
                         n_kv_head=3,
                         n_mlp_hidden=1536,
                         sdpa_implementation="xla")
-    
+
+    output_dir = Path("/workspace/").absolute()
     flax_model = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
     hf_model = convert_to_hf(flax_model)
     #hf_tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM-135M")

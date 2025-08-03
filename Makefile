@@ -33,10 +33,14 @@ print-platform:
 install:	
 	uv sync --extra $(JAX_PLATFORM)
 
-# Install development dependencies
+# Set up dev configuration
 dev: install
 	uv sync --extra dev --extra $(JAX_PLATFORM)
 	uv run python -m ipykernel install --user --name=jaxpt --display-name "Python $(PYTHON_VERSION) (jaxpt)"
+
+# Set up eval configuration
+eval:
+	uv sync --extra eval --extra $(JAX_PLATFORM)
 
 # Regenerate lockfile from scratch
 regen-lock:
@@ -118,6 +122,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make install   - Install dependencies from lockfile"
 	@echo "  make dev       - Install all dependencies including dev from lockfile"
+	@echo "  make eval      - Install all dependencies including eval from lockfile"
 	@echo "  make regen-lock - Regenerate lockfile from scratch"
 	@echo "  make add       - Add a production dependency (make add pkg=package_name)"
 	@echo "  make add-dev   - Add a development dependency (make add-dev pkg=package_name)"
