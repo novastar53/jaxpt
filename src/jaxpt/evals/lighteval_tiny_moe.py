@@ -1,12 +1,14 @@
+from dataclasses import dataclass
 import os
 
-import tqdm 
+from tqdm import tqdm 
 
 os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 from typing import Union, Optional
 import argparse
 from pathlib import Path
+import logging
 import warnings
 
 import jax
@@ -19,6 +21,9 @@ from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config
 from jaxpt.checkpointers import load_checkpoint_from_gcloud
 from jaxpt.utils import count_params
 
+import torch
+from torch.utils.data import DataLoader
+
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 from lighteval.models.abstract_model import LightevalModel, ModelInfo
@@ -26,17 +31,21 @@ from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
 from lighteval.models.custom.custom_model import CustomModelConfig
 from lighteval.logging.evaluation_tracker import EvaluationTracker
 from lighteval.models.model_output import (
+    Batch,
     GenerativeResponse,
     LoglikelihoodResponse,
     LoglikelihoodSingleTokenResponse,
 )
 from lighteval.data import GenerativeTaskDataset, LoglikelihoodDataset, LoglikelihoodSingleTokenDataset
 from lighteval.tasks.requests import (
+    Request,
     GreedyUntilRequest,
     LoglikelihoodRequest,
     LoglikelihoodRollingRequest,
     LoglikelihoodSingleTokenRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 TokenSequence = Union[list[int], jax.Array, BatchEncoding]
 
@@ -57,8 +66,19 @@ else:
 jax.config.update("jax_default_matmul_precision", "BF16_BF16_F32") # Set the default precision for matrix multiplication
 
 mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
+spec = jax.sharding.PartitionSpec("devices",)
+sharding = jax.sharding.NamedSharding(mesh, spec)
 
 STARTING_BATCH_SIZE = 512
+
+@dataclass
+class Jaxpt_Batch:
+    input_ids: np.ndarray
+    input_mask: np.ndarray
+    input_lengths: list[int]
+    truncated: list[int]
+    padded: list[int]
+
 
 class Lighteval_Tiny_MoE(LightevalModel):
     def __init__(self, config):
@@ -83,6 +103,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
             "HuggingFaceTB/SmolLM-135M"
         )
         self._tokenizer = tokenizer
+        self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
         self.pairwise_tokenization = False
         self._add_special_tokens = False
         self._max_length = config.block_size
@@ -125,7 +146,6 @@ class Lighteval_Tiny_MoE(LightevalModel):
 
     def loglikelihood(self, requests, log=True) -> list[LoglikelihoodResponse]:
         # Implement loglikelihood computation
-        print(requests)
         for request in requests:
             if request.context == "":
                 request.tokenized_context = [self.tokenizer.eos_token_id]
@@ -137,28 +157,16 @@ class Lighteval_Tiny_MoE(LightevalModel):
                 )
 
         dataset = LoglikelihoodDataset(requests=requests, num_dataset_splits=self.DATASET_SPLITS)
-        starting_batch_size = STARTING_BATCH_SIZE
         res = []
 
 
         for split in tqdm(dataset.splits_iterator(), disable=self.disable_tqdm):
             context_enc = split[0].tokenized_context
             continuation_enc = split[0].tokenized_continuation
-            if rolling:  # we take all the sequence in rolling mode
-                max_input_length = len(context_enc + continuation_enc)
-            else:  # in normal mode, we left cut the context if needed
-                max_input_length = max(min(self.max_length, len(context_enc + continuation_enc) - 1), 1)
+            max_input_length = max(min(self.max_length, len(context_enc + continuation_enc) - 1), 1)
 
-            batch_size = self._get_batch_size(
-                override_bs=self.config.batch_size,
-                max_input_length=max_input_length,
-                starting_batch_size=starting_batch_size,
-            )
-            starting_batch_size = batch_size * 2
 
-            dataloader = DataLoader(split, batch_size=batch_size, collate_fn=lambda batch: batch)
-            if self.accelerator:
-                dataloader = self.accelerator.prepare(dataloader)
+            dataloader = DataLoader(split, batch_size=16, collate_fn=lambda batch: batch)
 
             for batch in tqdm(dataloader, disable=self.disable_tqdm):
                 prepared_batch = self.prepare_batch_logprob(
@@ -167,95 +175,91 @@ class Lighteval_Tiny_MoE(LightevalModel):
                     max_context=max_input_length,
                 )
 
-                model_output = self._model_call(prepared_batch.input_ids)
-                logits = F.log_softmax(model_output, dim=-1)  # [batch, padding_length, vocab]
+                x = jnp.array(prepared_batch.input_ids, device=sharding)
 
-                logits_sum = []
-                max_equals = []
-                batch_cont_tokens = []
-                for cur_request, cur_logits, inplen in zip(batch, logits, prepared_batch.input_lengths):
-                    cont_toks = torch.tensor(cur_request.tokenized_continuation, dtype=torch.long, device=self.device)
-                    contlen = cont_toks.shape[0]
-                    # We only look at the continuation tokens
-                    if contlen > inplen:
-                        # Continuation is longer than the input size, we are in rolling mode (only continuation)
-                        cur_logits = cur_logits.unsqueeze(0).to(self.device)  # [1, seq, vocab]
-                        cont_toks = cont_toks[:inplen].unsqueeze(0).to(self.device)  # [1, seq]
-                    else:
-                        cur_logits = (
-                            cur_logits[inplen - contlen : inplen].unsqueeze(0).to(self.device)
-                        )  # [1, seq, voc]
-                        cont_toks = cont_toks.unsqueeze(0).to(self.device)  # [1, seq]
+                with mesh: 
+                    model_output = self.model(x)
+                    logits = jax.nn.log_softmax(model_output, axis=-1)  # [batch, padding_length, vocab]
+            
+                    logits_sum = []
+                    max_equals = []
+                    batch_cont_tokens = []
+                    for cur_request, cur_logits, inplen in zip(batch, logits, prepared_batch.input_lengths):
+                        cont_toks = jnp.array(cur_request.tokenized_continuation, dtype=jnp.int32)
+                        contlen = cont_toks.shape[0]
+                        # We only look at the continuation tokens
+                        if contlen > inplen:
+                            # Continuation is longer than the input size, we are in rolling mode (only continuation)
+                            cur_logits = jnp.expand_dims(cur_logits, 0)  # [1, seq, vocab]
+                            cont_toks = jnp.expand_dims(cont_toks[:inplen], 0)  # [1, seq]
+                        else:
+                            cur_logits = (
+                                jnp.expand_dims(cur_logits[inplen - contlen : inplen], 0)
+                            )  # [1, seq, voc]
+                            cont_toks = jnp.expand_dims(cont_toks, 0)
 
-                    # Check if per-token argmax is exactly equal to continuation
-                    greedy_tokens = cur_logits.argmax(dim=-1).to(self.device)
-                    # Sometimes the continuation is longer than allowed by the model, we only look at the first tokens
-                    max_equal = (greedy_tokens == cont_toks).all().squeeze(0).to(self.device)
+                        # Check if per-token argmax is exactly equal to continuation
+                        greedy_tokens = cur_logits.argmax(axis=-1)
+                        # Sometimes the continuation is longer than allowed by the model, we only look at the first tokens
+                        max_equal = (greedy_tokens == cont_toks).all() #.squeeze(0)
 
-                    # Obtain log-probs at the corresponding continuation token indices
-                    cur_logits = torch.gather(cur_logits, 2, cont_toks.unsqueeze(-1)).squeeze(-1)  # [1, seq]
+                        # Obtain log-probs at the corresponding continuation token indices
+                        # torch.gather(cur_logits, 2, cont_toks.unsqueeze(-1)).squeeze(-1)
+                        cur_logits = jnp.take_along_axis(
+                            cur_logits, jnp.expand_dims(cont_toks, axis=-1), axis=2
+                        ).squeeze(-1)  # [1, seq]
 
-                    # Answer: (log prob, is-exact-match)
-                    logits_sum.append(cur_logits.sum())
-                    max_equals.append(max_equal)
-                    batch_cont_tokens.append(cont_toks)
+                        # Answer: (log prob, is-exact-match)
+                        logits_sum.append(cur_logits.sum())
+                        max_equals.append(max_equal)
+                        batch_cont_tokens.append(cont_toks)
 
-                # Sync all
-                # Need reshaping before gather
-                batched_inputs, len_inputs = self.pad_and_gather(prepared_batch.input_ids)
-                max_cont_tokens_length = max(len(c[0]) for c in batch_cont_tokens)
-                # These are the true lengths of the continuation tokens, we have to save them to be able to removed padding tokens from the generated tokens.
-                batch_cont_token_lengths = torch.tensor([c.shape[1] for c in batch_cont_tokens], device=self.device)
-                batch_cont_tokens = torch.cat(
-                    [
-                        F.pad(c, (0, max_cont_tokens_length - c.shape[1], 0, 0), value=self.tokenizer.pad_token_id)
-                        for c in batch_cont_tokens
-                    ],
-                    dim=0,
-                )
-                batch_cont_tokens, _ = self.pad_and_gather(batch_cont_tokens)
-                # Can be gathered as such
-                logits = torch.tensor(logits_sum, device=self.device)
-                max_equal = torch.tensor(max_equals, device=self.device)
-                batch_truncated = torch.tensor(prepared_batch.truncated, device=self.device)
-                batch_padded = torch.tensor(prepared_batch.padded, device=self.device)
-                if self.accelerator:
-                    logits = self.accelerator.gather_for_metrics(logits)
-                    max_equal = self.accelerator.gather_for_metrics(max_equal)
-                    batch_truncated = self.accelerator.gather_for_metrics(batch_truncated)
-                    batch_padded = self.accelerator.gather_for_metrics(batch_padded)
-                    batch_cont_token_lengths = self.accelerator.gather_for_metrics(batch_cont_token_lengths)
-
-                for logit, cont_tokens, maxe, batched_input, trunc, padded, len_input, len_token in zip(
-                    logits,
-                    batch_cont_tokens,
-                    max_equal,
-                    batched_inputs,
-                    batch_truncated,
-                    batch_padded,
-                    len_inputs,
-                    batch_cont_token_lengths,
-                ):
-                    # Filter out padding tokens from input_tokens and generated_tokens
-                    input_tokens = batched_input[:len_input].cpu().tolist()
-                    generated_tokens = cont_tokens[:len_token].cpu().tolist()
-
-                    answer = LoglikelihoodResponse(
-                        # todo: we might want to store the logits unsummed
-                        result=(float(logit.sum()), bool(maxe)) if return_bool_score else float(logit.sum()),
-                        input_tokens=input_tokens,
-                        generated_tokens=generated_tokens,
-                        truncated_tokens_count=trunc.cpu().item(),
-                        padded_tokens_count=padded.cpu().item(),
+                    # Sync all
+                    # Need reshaping before gather
+                    batched_inputs, len_inputs = self.pad_and_gather(prepared_batch.input_ids)
+                    max_cont_tokens_length = max(len(c[0]) for c in batch_cont_tokens)
+                    # These are the true lengths of the continuation tokens, we have to save them to be able to removed padding tokens from the generated tokens.
+                    batch_cont_token_lengths = jnp.array([c.shape[1] for c in batch_cont_tokens])
+                    batch_cont_tokens = jnp.concatenate(
+                        [
+                            jnp.pad(
+                                c,
+                                ((0, 0), (0, max_cont_tokens_length - c.shape[1])),
+                                constant_values=self.tokenizer.pad_token_id
+                            )
+                            for c in batch_cont_tokens
+                        ],
+                        axis=0,
                     )
-                    res.append(answer)
+                    batch_cont_tokens, _ = self.pad_and_gather(batch_cont_tokens)
+                    # Can be gathered as such
+                    logits = jnp.array(logits_sum)
+                    max_equal = jnp.array(max_equals)
+                    batch_truncated = jnp.array(prepared_batch.truncated)
+                    batch_padded = jnp.array(prepared_batch.padded)
+                    for logit, cont_tokens, maxe, batched_input, trunc, padded, len_input, len_token in zip(
+                        logits,
+                        batch_cont_tokens,
+                        max_equal,
+                        batched_inputs,
+                        batch_truncated,
+                        batch_padded,
+                        len_inputs,
+                        batch_cont_token_lengths,
+                    ):
+                        # Filter out padding tokens from input_tokens and generated_tokens
+                        input_tokens = batched_input[:len_input].tolist()
+                        generated_tokens = cont_tokens[:len_token].tolist()
 
-                # Clean up GPUs
-                del model_output
-                del logits
-                del batched_inputs
-                del batch_truncated
-                del batch_padded
+                        answer = LoglikelihoodResponse(
+                            # todo: we might want to store the logits unsummed
+                            result=(float(logit.sum()), bool(maxe)),
+                            input_tokens=input_tokens,
+                            generated_tokens=generated_tokens,
+                            truncated_tokens_count=int(trunc),
+                            padded_tokens_count=int(padded),
+                        )
+                        res.append(answer)
 
         return dataset.get_original_order(res)
 
@@ -281,6 +285,82 @@ class Lighteval_Tiny_MoE(LightevalModel):
     def tok_decode_jax(self, tokens: jax.Array) -> list[str]:
         return self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
 
+    def prepare_batch_logprob(
+        self, batch: list[Request], padding_length: int, max_context: Optional[int] = None, single_token: bool = False
+    ):
+        """Tokenize a batch of inputs and return also the length, truncations and padding.
+        This step is done manually since we tokenize log probability inputs together with their continuation,
+        to manage possible extra spaces added at the start by tokenizers, see tok_encode_pair.
+        """
+        if single_token:
+            inputs = [request.tokenized_context for request in batch]
+        else:
+            inputs = [
+                request.tokenized_context + request.tokenized_continuation[:-1] for request in batch
+            ]  # The last token (an eos) doesn't need to be given to the model
+
+        input_tokens = []
+        attention_masks = []
+        input_lengths = []
+        truncated = []
+        padded = []
+
+        if max_context is None:
+            logger.warning("max_context is None, using max_length")
+            max_context = self.max_length
+
+        # Each sample is concatenated and cut to length or padded to max_length
+        for orig_tokens in inputs:
+            truncated.append(max(len(orig_tokens) - max_context, 0))
+
+            # Truncate from the left if needed to fit in the model's context
+            tokens = np.array((orig_tokens)[-max_context:], dtype=np.int32)
+            sequence_len = tokens.shape[0]
+
+            # We add padding, if needed
+            pad_len = padding_length if padding_length is not None else sequence_len
+
+            if pad_len - sequence_len < 0:
+                logger.warning(f"Padding length {pad_len} is smaller than input length {sequence_len}")
+                raise ValueError("Negative padding")
+
+            padded.append(pad_len - sequence_len)
+            # Right padding, since we ignore these logprobs in the end
+            tokens = np.pad(tokens, (0, pad_len - sequence_len), constant_values=self.tokenizer.pad_token_id)
+
+            # We create the attention mask to ignore padding
+            mask = (tokens == self.tokenizer.pad_token_id)
+            attention_masks.append(mask[None, ...])
+
+            input_tokens.append(tokens[None, ...])  # [1, padding_length]
+            input_lengths.append(sequence_len)
+
+        batched_inputs = np.concatenate(input_tokens, axis=0)  # [batch, padding_length]
+        attention_masks = np.concatenate(attention_masks, axis=0)
+
+        return Jaxpt_Batch(
+            input_ids=batched_inputs,
+            input_mask=attention_masks,
+            input_lengths=input_lengths,
+            truncated=truncated,
+            padded=padded,
+        )
+
+    def pad_and_gather(
+        self, output_tensor
+    ):
+        """
+        Pads the `output_tensor` to the maximum length and gathers the lengths across processes.
+
+        Returns:
+            Tuple: The padded output tensor and the gathered length tensor.
+        """
+        length_tensor = jnp.array([output_tensor.shape[-1]] * output_tensor.shape[0])
+        max_length = int(length_tensor.max())
+        pad_width = [(0, 0)] * output_tensor.ndim
+        pad_width[-1] = (0, max_length - output_tensor.shape[-1])
+        output_tensor = jnp.pad(output_tensor, pad_width, constant_values=self.tokenizer.pad_token_id)
+        return output_tensor, length_tensor
 
 
 def main():

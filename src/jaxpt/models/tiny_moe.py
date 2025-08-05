@@ -30,9 +30,9 @@ class Tiny_MoE_Config(Config):
     n_kv_head: int = 4  # number of key-value heads
     n_embed: int = 576  # number token embedding dimensionsa
     n_experts: int = 8  # number of experts
-    mesh: jax.sharding.Mesh = None  # device mesh
+    mesh: jax.sharding.Mesh | None = None  # device mesh
     top_k: int = 2  # number of top experts to use
-    load_factor: int = 1.1 # load factor for expert buffers
+    load_factor: float = 1.1 # load factor for expert buffers
     expert_weight_priority: bool = True # sort expert buffer assignments by expert weight 
     aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
     n_mlp_hidden: int = 2304  # number of hidden dimensions
@@ -43,7 +43,7 @@ class Tiny_MoE_Config(Config):
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
     )
-    rope_theta: int = 1e-4  # base frequency for rope
+    rope_theta: float = 1e-4  # base frequency for rope
     init_stddev: float = 0.02  # stddev for layer init
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
