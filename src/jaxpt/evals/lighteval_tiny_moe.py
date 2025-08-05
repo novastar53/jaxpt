@@ -166,14 +166,20 @@ class Lighteval_Tiny_MoE(LightevalModel):
         dataset = LoglikelihoodDataset(requests=requests, num_dataset_splits=self.DATASET_SPLITS)
         res = []
 
-
+        split_id = 0
+        print("num dataset splits", len(dataset))
         for split in tqdm(dataset.splits_iterator(), disable=self.disable_tqdm):
+            print('starting split', split_id)
+            split_id += 1
             context_enc = split[0].tokenized_context
             continuation_enc = split[0].tokenized_continuation
             max_input_length = max(min(self.max_length, len(context_enc + continuation_enc) - 1), 1)
 
 
-            dataloader = DataLoader(split, batch_size=32, collate_fn=lambda batch: batch)
+            dataloader = DataLoader(split, batch_size=64, collate_fn=lambda batch: batch)
+
+            print("num batches", len(dataloader))
+            batch_id = 0
 
             for batch in tqdm(dataloader, disable=self.disable_tqdm):
                 prepared_batch = self.prepare_batch_logprob(
@@ -181,7 +187,10 @@ class Lighteval_Tiny_MoE(LightevalModel):
                     padding_length=max_input_length,
                     max_context=max_input_length,
                 )
+                print("starting batch", batch_id)
+                batch_id += 1 
 
+                x = prepared_batch.input_ids
                 if x.shape[0] % num_devices == 0:
                     x = jnp.array(prepared_batch.input_ids, device=sharding)
                 else:
