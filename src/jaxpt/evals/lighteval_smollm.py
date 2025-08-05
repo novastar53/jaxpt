@@ -84,7 +84,7 @@ def main():
     output_dir = Path("/workspace/").absolute()
     #m = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
     #m = convert_to_hf(m)
-    m = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    #m = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
 
     model_cfg = TransformersModelConfig(
         model_name="HuggingFaceTB/SmolLM-135M",
@@ -111,7 +111,6 @@ def main():
         tasks=",".join(tasks),
         pipeline_parameters=params,
         evaluation_tracker=tracker,
-        model=m,
         model_config=model_cfg,
     )
 
