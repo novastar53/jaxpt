@@ -182,7 +182,10 @@ class Lighteval_Tiny_MoE(LightevalModel):
                     max_context=max_input_length,
                 )
 
-                x = jnp.array(prepared_batch.input_ids, device=sharding)
+                if x.shape[0] % num_devices == 0:
+                    x = jnp.array(prepared_batch.input_ids, device=sharding)
+                else:
+                    x = jnp.array(prepared_batch.input_ids)
 
                 with mesh: 
                     start = time()
