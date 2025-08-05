@@ -1,6 +1,8 @@
 import os
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
+
+from time import time
 
 from dataclasses import dataclass
 
@@ -128,6 +130,10 @@ class Lighteval_Tiny_MoE(LightevalModel):
             rngs
         )
 
+    @nnx.jit(static_argnums=(0, ))
+    def _call_model(self, x):
+        return self.model(x)
+
     @property
     def tokenizer(self):
         return self._tokenizer
@@ -167,7 +173,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
             max_input_length = max(min(self.max_length, len(context_enc + continuation_enc) - 1), 1)
 
 
-            dataloader = DataLoader(split, batch_size=16, collate_fn=lambda batch: batch)
+            dataloader = DataLoader(split, batch_size=32, collate_fn=lambda batch: batch)
 
             for batch in tqdm(dataloader, disable=self.disable_tqdm):
                 prepared_batch = self.prepare_batch_logprob(
@@ -179,13 +185,17 @@ class Lighteval_Tiny_MoE(LightevalModel):
                 x = jnp.array(prepared_batch.input_ids, device=sharding)
 
                 with mesh: 
-                    model_output = self.model(x)
+                    start = time()
+                    model_output = self._call_model(x)
                     logits = jax.nn.log_softmax(model_output, axis=-1)  # [batch, padding_length, vocab]
+                    duration = time() - start 
+                    print("model time", duration)
             
                     logits_sum = []
                     max_equals = []
                     batch_cont_tokens = []
                     for cur_request, cur_logits, inplen in zip(batch, logits, prepared_batch.input_lengths):
+                        start = time()
                         cont_toks = jnp.array(cur_request.tokenized_continuation, dtype=jnp.int32)
                         contlen = cont_toks.shape[0]
                         # We only look at the continuation tokens
@@ -261,6 +271,8 @@ class Lighteval_Tiny_MoE(LightevalModel):
                             padded_tokens_count=int(padded),
                         )
                         res.append(answer)
+                    duration = time() - start 
+                    print("loop time", duration)
 
         return dataset.get_original_order(res)
 
