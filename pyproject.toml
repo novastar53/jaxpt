@@ -13,6 +13,7 @@ dependencies = [
     "english-words>=2.0.1",
     "flash-attention-jax>=0.3.1",
     "numpy==1.26.4",
+    "more-itertools>=10.7.0",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,11 @@ eval = [
     "requests>=2.32.3",
     "torch==2.7.1",
     "lighteval>=0.10.0",
+    "langcodes>=3.5.0",
+    "spacy>=3.8.7",
+    "stanza>=1.10.1",
+    "pyvi>=0.1.1",
+    "jieba>=0.42.1",
 ]
 cuda = [
     #"jax[cuda12]==0.6.2",
@@ -36,7 +42,7 @@ tpu = [
     "cloud-tpu-client",
 ]
 dev = [
-    "datasets>=4.0.0",
+    "datasets==3.6.0",
     "tiktoken>=0.9.0",
     "transformers>=4.54.1",
     "seaborn[dev]>=0.13.2",
