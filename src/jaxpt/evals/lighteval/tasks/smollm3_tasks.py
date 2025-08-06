@@ -17,7 +17,7 @@
 Usage:
 
 lighteval accelerate "model_name=HuggingFaceTB/SmolLM-135M,dtype=bfloat16,generation_parameters={max_new_tokens:2048,temperature:0.6,top_p:0.95}" \
-    "custom|hellaswag_mcf|0|0" \
+    "custom|hellaswag_cf|0|0" \
     --output-dir evals/ \
     --custom-tasks src/jaxpt/evals/lighteval/tasks/smollm3_tasks.py \
     --save-details
