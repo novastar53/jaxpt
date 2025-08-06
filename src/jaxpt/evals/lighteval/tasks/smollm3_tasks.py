@@ -21,6 +21,12 @@ lighteval accelerate "model_name=HuggingFaceTB/SmolLM-135M,dtype=bfloat16,genera
     --output-dir evals/ \
     --custom-tasks src/jaxpt/evals/lighteval/tasks/smollm3_tasks.py \
     --save-details
+
+lighteval custom  "tiny_moe"  "src/jaxpt/evals/lighteval_tiny_moe.py" \
+    "custom|hellaswag_cf|0|0" \
+    --output-dir evals/ \
+    --custom-tasks src/jaxpt/evals/lighteval/tasks/smollm3_tasks.py \
+    --save-details
 """
 from functools import partial
 import numpy as np
