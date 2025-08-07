@@ -223,19 +223,22 @@ class GQ_Attention(SelfAttentionBase):
             q = jnp.concat([q_prev, q], axis=1)
             k = jnp.concat((self.key_cache, k), axis=1) 
             v = jnp.concat((self.value_cache, v), axis=1)
+            #query_attn_mask = (q.sum(-1) != 0)
+            #if mask:
+            #    mask = mask & query_attn_mask
+            #else: mask = query_attn_mask
 
         y = self._apply_attn(
             q, k, v, mask=mask
         )  # (B, T, n_head, C // n_head)
 
-        if self.config.use_cache is True and self.key_cache is not None: 
-            y = y[:, -1:, ...]
+        if self.config.use_cache is True : 
+            if self.key_cache is not None:
+                y = y[:, -1:, ...]
+            self.key_cache = k[:, -self.config.block_size:, :] # truncate if bigger than block size
+            self.value_cache = v[:, -self.config.block_size:, :]
 
         y = self.wproj(y)
-
-        self.key_cache = k[:, -self.config.block_size:, :] # truncate if bigger than block size
-        self.value_cache = v[:, -self.config.block_size:, :]
-
         return y
 
 

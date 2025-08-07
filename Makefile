@@ -40,7 +40,7 @@ dev: install
 
 # Set up eval configuration
 eval:
-	uv sync --extra eval --extra $(JAX_PLATFORM)
+	uv sync --extra eval --extra dev --extra $(JAX_PLATFORM)
 
 # Regenerate lockfile from scratch
 regen-lock:
