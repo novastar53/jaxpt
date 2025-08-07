@@ -199,9 +199,14 @@ class GQ_Attention(SelfAttentionBase):
 
 
     def _apply_attn(self, q, k, v, mask):
+        B, _, C = q.shape
+        q = q.reshape((B, -1, self.n_head, C // self.n_head))
+        k = k.reshape((B, -1, self.n_kv_head, C // self.n_head))
+        v = v.reshape((B, -1, self.n_kv_head, C // self.n_head))
         y = _calc_attention(
             q, k, v, implementation=self.implementation, mask=mask
         )  # (B, T, n_head, C // n_head)
+        y = jnp.reshape(y, (B, -1, C))
         return y
 
 
@@ -211,45 +216,26 @@ class GQ_Attention(SelfAttentionBase):
         kv = self.wkv(x)  # (B, x_T, 2 * n_kv_head * C // n_head)
         k, v = jnp.split(
             kv, 2, axis=-1
-        )  # 2 x (B, x_T, n_kv_head * C // n_head)
+        )  # (B, x_T, n_kv_head * C // n_head)
 
-        k_T, v_T = x_T, x_T
-
-        q = q.reshape((B, x_T, self.n_head, C // self.n_head))
-        offset = 0
-        if self.key_cache is not None:
-            offset = self.key_cache.shape[1]
-
-        if self.config.use_cache is True:
-            if self.key_cache is None:
-                self.key_cache = k
-                k_T = x_T
-            else:
-                self.key_cache = jnp.concat((self.key_cache, k), axis=1)
-                self.key_cache = self.key_cache[:, -self.config.block_size :, :]
-                k_T = self.key_cache.shape[1]
-                k = self.key_cache
-
-            if self.value_cache is None:
-                self.value_cache = v
-                v_T = x_T
-            else:
-                self.value_cache = jnp.concat((self.value_cache, v), axis=1)
-                self.value_cache = self.value_cache[
-                    :, -self.config.block_size :, :
-                ]
-                v_T = self.key_cache.shape[1]
-                v = self.value_cache
-
-        k = k.reshape((B, k_T, self.n_kv_head, C // self.n_head))
-        v = v.reshape((B, v_T, self.n_kv_head, C // self.n_head))
+        if self.config.use_cache is True and self.key_cache is not None:
+            q_prev = jnp.zeros((B, self.key_cache.shape[1], C), dtype=jnp.bfloat16)
+            q = jnp.concat([q_prev, q], axis=1)
+            k = jnp.concat((self.key_cache, k), axis=1) 
+            v = jnp.concat((self.value_cache, v), axis=1)
 
         y = self._apply_attn(
             q, k, v, mask=mask
         )  # (B, T, n_head, C // n_head)
 
-        y = jnp.reshape(y, (B, x_T, C))
+        if self.config.use_cache is True and self.key_cache is not None: 
+            y = y[:, -1:, ...]
+
         y = self.wproj(y)
+
+        self.key_cache = k[:, -self.config.block_size:, :] # truncate if bigger than block size
+        self.value_cache = v[:, -self.config.block_size:, :]
+
         return y
 
 
@@ -260,15 +246,16 @@ class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
 
 
     def _apply_attn(self, q, k, v, mask):
-        offset = 0
-        if self.key_cache is not None:
-            offset = self.key_cache.shape[1]
-
-        q = self.apply_rope(q, offset=offset)
+        B, _, C = q.shape
+        q = q.reshape((B, -1, self.n_head, C // self.n_head))
+        k = k.reshape((B, -1, self.n_kv_head, C // self.n_head))
+        v = v.reshape((B, -1, self.n_kv_head, C // self.n_head))
+        q = self.apply_rope(q)
         k = self.apply_rope(k)
         y = _calc_attention(
             q, k, v, implementation=self.implementation, mask=mask
         )  # (B, T, n_head, C // n_head)
+        y = jnp.reshape(y, (B, -1, C))
         return y
 
 
