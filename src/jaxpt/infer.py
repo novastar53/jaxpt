@@ -52,12 +52,13 @@ def generate(
     model: nnx.Module,
     *,
     x: jax.Array,
+    attn_mask: jax.Array | None = None,
     key: jax.random.PRNGKey,
     max_length=50,
     temperature=0.2,
     top_k=50,
 ) -> jax.Array:
-    logits = model(x) / temperature
+    logits = model(x, mask=attn_mask) / temperature
     logits = logits[:, -1, :]
     x_next, key = top_k_sampling(logits, key, k=top_k)
     x_next = x_next[..., None]

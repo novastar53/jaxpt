@@ -1,13 +1,10 @@
 import os
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 
-from time import time
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 from dataclasses import dataclass
-
-from tqdm import tqdm 
-
+from tqdm import tqdm
+from functools import partial
 from typing import Union, Optional
 import argparse
 from pathlib import Path
@@ -20,16 +17,20 @@ import flax.nnx as nnx
 
 import numpy as np
 
+
 from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config
 from jaxpt.checkpointers import load_checkpoint_from_gcloud
-from jaxpt.utils import count_params
+from jaxpt.utils import count_params, create_sharded_model
+from jaxpt.infer import generate
 
 import torch
 from torch.utils.data import DataLoader
 
+import transformers 
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 from lighteval.models.abstract_model import LightevalModel, ModelInfo
+from lighteval.models.transformers.transformers_model import stop_sequences_criteria
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
 from lighteval.models.custom.custom_model import CustomModelConfig
 from lighteval.logging.evaluation_tracker import EvaluationTracker
@@ -47,6 +48,7 @@ from lighteval.tasks.requests import (
     LoglikelihoodRollingRequest,
     LoglikelihoodSingleTokenRequest,
 )
+from lighteval.utils.utils import as_list
 
 logger = logging.getLogger(__name__)
 
@@ -90,17 +92,22 @@ class Lighteval_Tiny_MoE(LightevalModel):
                         name="Tiny_MoE",
                         dtype=jnp.bfloat16, \
                         vocab_size=49152,
-                        n_layer=30,
+                        n_layer=4,
                         block_size=2048,
                         n_head=9,
                         n_kv_head=3,
                         n_mlp_hidden=1536,
                         expert_weight_priority=False,
-                        load_factor=2.0,
+                        load_factor=2.5,
+                        use_cache=True,
                         sdpa_implementation="cudnn" if device=="gpu" else "xla")
+
+
+        self.key = jax.random.PRNGKey(1337)
         with mesh:
             self.model = self._create_model(config) 
 
+        self._call_model = partial(self._do_call_model, self.model)
 
         tokenizer = AutoTokenizer.from_pretrained(
             "HuggingFaceTB/SmolLM-135M"
@@ -110,6 +117,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
         self.pairwise_tokenization = False
         self._add_special_tokens = False
         self._max_length = config.block_size
+        self.use_chat_template = False
 
         self.model_info = ModelInfo(
             model_name=config.name,
@@ -119,21 +127,26 @@ class Lighteval_Tiny_MoE(LightevalModel):
         )
 
 
+    def _get_random_key(self):
+        key, subkey = jax.random.split(self.key)
+        self.key = key
+        return subkey
+
     def _create_model(self, config):
-        key = jax.random.PRNGKey(1337)
-        rngs = nnx.Rngs(key)
-        return load_checkpoint_from_gcloud(
-            Tiny_MoE, config, Path().absolute(), 
-            "alpha_training_runs", 
-            "run_20250729_berne_abraham", 
-            329971, 
-            rngs
-        )
+        rngs = nnx.Rngs(self._get_random_key())
+        #return load_checkpoint_from_gcloud(
+        #    Tiny_MoE, config, Path().absolute(), 
+        #    "alpha_training_runs", 
+        #    "run_20250729_berne_abraham", 
+        #    329971, 
+        #    rngs
+        #)
+        return create_sharded_model(Tiny_MoE, config, rngs)
 
-    @nnx.jit(static_argnums=(0, ))
-    def _call_model(self, x):
-        return self.model(x)
-
+    @staticmethod 
+    def _do_call_model(model, x):
+        return model(x)
+    
     @property
     def tokenizer(self):
         return self._tokenizer
@@ -146,10 +159,111 @@ class Lighteval_Tiny_MoE(LightevalModel):
     def max_length(self) -> int:
         return self._max_length
 
-    def greedy_until(self, requests, max_tokens=None, stop_sequences=None) -> list[GenerativeResponse]:
-        # Implement generation logic
-        print(requests)
-        return list() 
+    def greedy_until(
+        self,
+        requests: list[GreedyUntilRequest],
+    ) -> list[GenerativeResponse]:
+        """
+        Generates responses using a greedy decoding strategy until certain ending conditions are met.
+
+        Args:
+            requests (list[Request]): list of requests containing the context and ending conditions.
+            override_bs (int, optional): Override the batch size for generation. Defaults to None.
+
+        Returns:
+            list[GenerativeResponse]: list of generated responses.
+        """
+        for request in requests:
+            request.stop_sequence = as_list(request.stop_sequence) + [self.tokenizer.eos_token]
+            request.tokenized_context = self.tok_encode_jax(request.context)
+
+        dataset = GenerativeTaskDataset(requests=requests, num_dataset_splits=self.DATASET_SPLITS)
+        starting_batch_size = STARTING_BATCH_SIZE
+        results = []
+
+        for split in tqdm(
+            dataset.splits_iterator(),
+            total=dataset.num_dataset_splits,
+            desc="Splits",
+            position=0,
+            disable=self.disable_tqdm,
+        ):
+            if split[0].generation_size is None:
+                # No constraints on the generation size: max length allowed is the max model context
+                max_context_continuation_size_allowed = self.max_length
+            else:
+                # Longest context in the current split is the first item (since we sort reversed)
+                longest_context_continuation_size_in_split = len(split[0].tokenized_context) + split[0].generation_size
+                max_context_continuation_size_allowed = min(
+                    longest_context_continuation_size_in_split, self.max_length
+                )
+
+            dataloader = DataLoader(split, batch_size=16, collate_fn=lambda batch: batch)
+
+            for batch in tqdm(
+                dataloader, desc="Greedy generation", position=1, leave=False, disable=self.disable_tqdm
+            ):
+                stop_tokens = batch[0].stop_sequence
+                max_new_tokens = batch[0].generation_size
+                returns_logits = batch[0].use_logits
+                num_samples = batch[0].num_samples
+                do_sample = batch[0].do_sample
+
+                context = [c.context for c in batch]
+
+                # See doc https://huggingface.co/docs/transformers/v4.38.2/en/pad_truncation#padding-and-truncation
+                # Will do left truncation and padding, as defined when creating the tokenizer
+                tokenized = self.tokenizer(
+                    context,
+                    truncation="longest_first",  # we truncate to the model max length if needed
+                    padding="longest",  # we pad to the longest sequence
+                    return_tensors="np",
+                    max_length=max_context_continuation_size_allowed,  # we always allow minimum one token of generation
+                    add_special_tokens=self.add_special_tokens,
+                )
+
+                # The main question for this step is the following:
+                # Would we rather truncate the prompt to allow generation to go to max_new_tokens, at the risk
+                # of losing some meaning, or have some generations that are exceedingly short?
+                # The choice we go for here is to avoid truncating the prompt if we can, since it
+                # should have been managed by the prompt creator/few shot manager if requested by the user.
+                context_size = tokenized["input_ids"].shape[1]
+                if context_size > self.max_length:
+                    logger.warning(
+                        f"The context size of your batch ({context_size}) is bigger than the maximum context size allowed by the model ({self.max_length}) for a task in"
+                        + str({i.task_name for i in batch})
+                        + ". This is likely to lead to some errors."  # noqa C401
+                    )
+                    # There will be truncation of at least one sample, maximum generation size will be one
+                    max_new_tokens = 1
+                else:  # We can't allow generation of more than max_length
+                    if max_new_tokens is None:  # If generation size is not set, we go all the way
+                        max_new_tokens = self.max_length - context_size
+                    else:
+                        max_new_tokens = min(self.max_length - context_size, max_new_tokens)
+                        if max_new_tokens < 1:
+                            max_new_tokens = 1
+
+                prepared_batch = Jaxpt_Batch(
+                    input_ids=tokenized["input_ids"],
+                    input_lengths=[len(item == 1) for item in tokenized["attention_mask"]],
+                    input_mask=tokenized["attention_mask"],
+                    truncated=[max(len(c) - tokenized["input_ids"].shape[1], 0) for c in context],
+                    padded=[sum(mask == 0) for mask in tokenized["attention_mask"]],
+                )
+
+                cur_reponses = self._generate(
+                    batch=prepared_batch,
+                    max_new_tokens=max_new_tokens,
+                    stop_tokens=stop_tokens,
+                    returns_logits=returns_logits,
+                    num_samples=num_samples,
+                    do_sample=do_sample,
+                )
+                results.extend(cur_reponses)
+
+        return dataset.get_original_order(results)
+
 
     def loglikelihood(self, requests, log=True) -> list[LoglikelihoodResponse]:
         # Implement loglikelihood computation
@@ -166,20 +280,14 @@ class Lighteval_Tiny_MoE(LightevalModel):
         dataset = LoglikelihoodDataset(requests=requests, num_dataset_splits=self.DATASET_SPLITS)
         res = []
 
-        split_id = 0
-        print("num dataset splits", len(dataset))
+
         for split in tqdm(dataset.splits_iterator(), disable=self.disable_tqdm):
-            print('starting split', split_id)
-            split_id += 1
             context_enc = split[0].tokenized_context
             continuation_enc = split[0].tokenized_continuation
             max_input_length = max(min(self.max_length, len(context_enc + continuation_enc) - 1), 1)
 
 
-            dataloader = DataLoader(split, batch_size=64, collate_fn=lambda batch: batch)
-
-            print("num batches", len(dataloader))
-            batch_id = 0
+            dataloader = DataLoader(split, batch_size=16, collate_fn=lambda batch: batch)
 
             for batch in tqdm(dataloader, disable=self.disable_tqdm):
                 prepared_batch = self.prepare_batch_logprob(
@@ -187,27 +295,17 @@ class Lighteval_Tiny_MoE(LightevalModel):
                     padding_length=max_input_length,
                     max_context=max_input_length,
                 )
-                print("starting batch", batch_id)
-                batch_id += 1 
 
-                x = prepared_batch.input_ids
-                if x.shape[0] % num_devices == 0:
-                    x = jnp.array(prepared_batch.input_ids, device=sharding)
-                else:
-                    x = jnp.array(prepared_batch.input_ids)
+                x = jnp.array(prepared_batch.input_ids, device=sharding)
 
                 with mesh: 
-                    start = time()
                     model_output = self._call_model(x)
                     logits = jax.nn.log_softmax(model_output, axis=-1)  # [batch, padding_length, vocab]
-                    duration = time() - start 
-                    print("model time", duration)
             
                     logits_sum = []
                     max_equals = []
                     batch_cont_tokens = []
                     for cur_request, cur_logits, inplen in zip(batch, logits, prepared_batch.input_lengths):
-                        start = time()
                         cont_toks = jnp.array(cur_request.tokenized_continuation, dtype=jnp.int32)
                         contlen = cont_toks.shape[0]
                         # We only look at the continuation tokens
@@ -283,10 +381,81 @@ class Lighteval_Tiny_MoE(LightevalModel):
                             padded_tokens_count=int(padded),
                         )
                         res.append(answer)
-                    duration = time() - start 
-                    print("loop time", duration)
 
         return dataset.get_original_order(res)
+
+
+    def _generate(
+        self,
+        batch: Jaxpt_Batch,
+        max_new_tokens: int,
+        stop_tokens: list[str],
+        returns_logits: Optional[bool] = False,
+        num_samples: Optional[int] = 1,
+        do_sample: Optional[bool] = False,
+    ) -> list[GenerativeResponse]:
+        """Contains the actual logic of the generation.
+        First computes the stop sequences, then generates the predictions, then converts the outputs to GenerativeResponse.
+        """
+        #stopping_criteria = stop_sequences_criteria(self.tokenizer, stop_sequences=stop_tokens, batch=batch)
+        batch_size, _ = batch.input_ids.shape
+
+        #generation_config = self.generation_config_dict.copy()
+        #generation_config.update(
+        #    max_new_tokens=max_new_tokens,
+        #    pad_token_id=self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
+        #    eos_token_id=self.tokenizer.eos_token_id,
+        #    do_sample=do_sample,
+        #    num_return_sequences=num_samples,
+        #    output_logits=returns_logits,
+        #    renormalize_logits=True,
+        #)
+
+        # Compute model generation
+        #outputs: GenerateOutput = self.model.generate(
+        #    input_ids=batch.input_ids,
+        #    attention_mask=batch.input_mask,
+        #    stopping_criteria=stopping_criteria,
+        #    **generation_config,
+        #)
+        with mesh:
+            for i in range(len(self.model.h)):
+                self.model.h[i].attn.key_cache = None
+                self.model.h[i].attn.value_cache = None
+            x = jnp.array(batch.input_ids, device=sharding)
+            mask = jnp.array(batch.input_mask, dtype=jnp.bool, device=sharding)
+            outputs = generate(self.model, x=x, attn_mask=mask, key=self._get_random_key(), max_length=50)
+        #generations = outputs[:, batch.input_ids.shape[1] :]
+        generations = jnp.reshape(outputs, (batch_size, num_samples, -1))
+
+        # We gather remaining info
+        batch.truncated = jnp.array(batch.truncated)
+        batch.padded = jnp.array(batch.padded)
+
+        # We convert to GenerativeResponse outputs
+        all_responses = []
+        for ix, (batched_generations, batched_input, trunc, padded) in enumerate(
+            zip(generations, batch.input_ids, batch.truncated, batch.padded)
+        ):
+            result_generations = []
+            decoded_generations = []
+            # Ensure the generated responses do not contain the stop sequences.
+            for generation in batched_generations:
+                result_generations.append(generation)
+                decoded_generation = self.tok_decode(generation)
+                decoded_generations.append(decoded_generation)
+
+            cur_response = GenerativeResponse(
+                result=decoded_generations,
+                logits=None,
+                generated_tokens=result_generations,
+                input_tokens=batched_input,
+                truncated_tokens_count=trunc.item(),
+                padded_tokens_count=padded.item(),
+            )
+            all_responses.append(cur_response)
+
+        return all_responses
 
 
     def loglikelihood_rolling(self, requests) -> list[LoglikelihoodResponse]:
@@ -372,7 +541,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
         )
 
     def pad_and_gather(
-        self, output_tensor
+        self, output_tensor, num_samples: int | None = None
     ):
         """
         Pads the `output_tensor` to the maximum length and gathers the lengths across processes.
@@ -380,12 +549,22 @@ class Lighteval_Tiny_MoE(LightevalModel):
         Returns:
             Tuple: The padded output tensor and the gathered length tensor.
         """
+
+        # Create a tensor of size batch_size, [output_length] * batch_size, for each process
+        # output_tensor can be of size: batch_size * num_samples * length_item or just batch_size * length_item
         length_tensor = jnp.array([output_tensor.shape[-1]] * output_tensor.shape[0])
-        max_length = int(length_tensor.max())
-        pad_width = [(0, 0)] * output_tensor.ndim
-        pad_width[-1] = (0, max_length - output_tensor.shape[-1])
-        output_tensor = jnp.pad(output_tensor, pad_width, constant_values=self.tokenizer.pad_token_id)
+        # We pad the output_tensor to the max length
+        max_length = length_tensor.max().item()
+        padding = (
+            (0, max_length - output_tensor.shape[-1], 0, 0, 0, 0)
+            if num_samples is not None
+            else (0, max_length - output_tensor.shape[-1], 0, 0)
+        )
+        output_tensor = jnp.pad(output_tensor, padding, value=self.tokenizer.pad_token_id)
         return output_tensor, length_tensor
+
+    def tok_decode_jax(self, tokens: jax.Array) -> list[str]:
+        return self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
 
 
 def main():
@@ -398,7 +577,7 @@ def main():
              "leaderboard|winogrande|0|0",
              "lighteval|triviaqa|0|0",
              "lighteval|race:high|0|0"]
-    tasks = "leaderboard|hellaswag|0|0"
+    tasks = "helm|piqa|0|0"
 
     key = jax.random.PRNGKey(1337)
     rngs = nnx.Rngs(key)
