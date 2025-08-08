@@ -1,6 +1,8 @@
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
+
 
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -21,7 +23,7 @@ import numpy as np
 from jaxpt.models.tiny_moe import Tiny_MoE, Tiny_MoE_Config
 from jaxpt.checkpointers import load_checkpoint_from_gcloud
 from jaxpt.utils import count_params, create_sharded_model
-from jaxpt.infer import generate
+from jaxpt.infer import generate, generate_slow
 
 import torch
 from torch.utils.data import DataLoader
@@ -88,24 +90,10 @@ class Jaxpt_Batch:
 class Lighteval_Tiny_MoE(LightevalModel):
     def __init__(self, config):
         self.config = config
-        config = Tiny_MoE_Config(
-                        name="Tiny_MoE",
-                        dtype=jnp.bfloat16, \
-                        vocab_size=49152,
-                        n_layer=4,
-                        block_size=2048,
-                        n_head=9,
-                        n_kv_head=3,
-                        n_mlp_hidden=1536,
-                        expert_weight_priority=False,
-                        load_factor=2.5,
-                        use_cache=True,
-                        sdpa_implementation="cudnn" if device=="gpu" else "xla")
-
 
         self.key = jax.random.PRNGKey(1337)
         with mesh:
-            self.model = self._create_model(config) 
+            self.model = self._create_model() 
 
         self._call_model = partial(self._do_call_model, self.model)
 
@@ -116,13 +104,13 @@ class Lighteval_Tiny_MoE(LightevalModel):
         self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
         self.pairwise_tokenization = False
         self._add_special_tokens = False
-        self._max_length = config.block_size
+        self._max_length = self.model.config.block_size
         self.use_chat_template = False
 
         self.model_info = ModelInfo(
-            model_name=config.name,
+            model_name=self.model.config.name,
             model_sha="",
-            model_dtype=str(config.dtype),
+            model_dtype=str(self.model.config.dtype),
             model_size=count_params(self.model) * 2,
         )
 
@@ -132,20 +120,35 @@ class Lighteval_Tiny_MoE(LightevalModel):
         self.key = key
         return subkey
 
-    def _create_model(self, config):
+    def _create_model(self):
+        config = Tiny_MoE_Config(
+                        name="Tiny_MoE",
+                        dtype=jnp.bfloat16, \
+                        vocab_size=49152,
+                        n_layer=30,
+                        block_size=2048,
+                        n_head=9,
+                        n_kv_head=3,
+                        n_mlp_hidden=1536,
+                        expert_weight_priority=False,
+                        load_factor=2.5,
+                        use_cache=False,
+                        sdpa_implementation="cudnn" if device=="gpu" else "xla")
+
         rngs = nnx.Rngs(self._get_random_key())
-        #return load_checkpoint_from_gcloud(
-        #    Tiny_MoE, config, Path().absolute(), 
-        #    "alpha_training_runs", 
-        #    "run_20250729_berne_abraham", 
-        #    329971, 
-        #    rngs
-        #)
-        return create_sharded_model(Tiny_MoE, config, rngs)
+        return load_checkpoint_from_gcloud(
+            Tiny_MoE, config, Path().absolute(), 
+            "alpha_training_runs", 
+            "run_20250729_berne_abraham", 
+            329971, 
+            rngs
+        )
+        #return create_sharded_model(Tiny_MoE, config, rngs)
 
     @staticmethod 
-    def _do_call_model(model, x):
-        return model(x)
+    @nnx.jit
+    def _do_call_model(model, x, mask=None):
+        return model(x, mask)
     
     @property
     def tokenizer(self):
@@ -419,12 +422,12 @@ class Lighteval_Tiny_MoE(LightevalModel):
         #    **generation_config,
         #)
         with mesh:
-            for i in range(len(self.model.h)):
-                self.model.h[i].attn.key_cache = None
-                self.model.h[i].attn.value_cache = None
+            #for i in range(len(self.model.h)):
+            #    self.model.h[i].attn.key_cache = None
+            #    self.model.h[i].attn.value_cache = None
             x = jnp.array(batch.input_ids, device=sharding)
             mask = jnp.array(batch.input_mask, dtype=jnp.bool, device=sharding)
-            outputs = generate(self.model, x=x, attn_mask=mask, key=self._get_random_key(), max_length=50)
+            outputs = generate_slow(self._call_model, x=x, attn_mask=mask, key=self._get_random_key(), max_length=50)
         #generations = outputs[:, batch.input_ids.shape[1] :]
         generations = jnp.reshape(outputs, (batch_size, num_samples, -1))
 
@@ -540,6 +543,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
             padded=padded,
         )
 
+
     def pad_and_gather(
         self, output_tensor, num_samples: int | None = None
     ):
@@ -549,19 +553,13 @@ class Lighteval_Tiny_MoE(LightevalModel):
         Returns:
             Tuple: The padded output tensor and the gathered length tensor.
         """
-
-        # Create a tensor of size batch_size, [output_length] * batch_size, for each process
-        # output_tensor can be of size: batch_size * num_samples * length_item or just batch_size * length_item
         length_tensor = jnp.array([output_tensor.shape[-1]] * output_tensor.shape[0])
-        # We pad the output_tensor to the max length
-        max_length = length_tensor.max().item()
-        padding = (
-            (0, max_length - output_tensor.shape[-1], 0, 0, 0, 0)
-            if num_samples is not None
-            else (0, max_length - output_tensor.shape[-1], 0, 0)
-        )
-        output_tensor = jnp.pad(output_tensor, padding, value=self.tokenizer.pad_token_id)
+        max_length = int(length_tensor.max())
+        pad_width = [(0, 0)] * output_tensor.ndim
+        pad_width[-1] = (0, max_length - output_tensor.shape[-1])
+        output_tensor = jnp.pad(output_tensor, pad_width, constant_values=self.tokenizer.pad_token_id)
         return output_tensor, length_tensor
+
 
     def tok_decode_jax(self, tokens: jax.Array) -> list[str]:
         return self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
@@ -577,7 +575,8 @@ def main():
              "leaderboard|winogrande|0|0",
              "lighteval|triviaqa|0|0",
              "lighteval|race:high|0|0"]
-    tasks = "helm|piqa|0|0"
+    #tasks = "helm|piqa|0|0"
+    tasks = "leaderboard|hellaswag|0|0"
 
     key = jax.random.PRNGKey(1337)
     rngs = nnx.Rngs(key)
