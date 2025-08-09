@@ -46,6 +46,7 @@ def generate_slow(
         x_next, key = top_k_sampling(logits, key, k=top_k)
         x_next = x_next[..., None]
         x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
+        attn_mask = jnp.concatenate((attn_mask, jnp.ones((attn_mask.shape[0], 1), dtype=jnp.bool)), axis=1)
     return x
 
 

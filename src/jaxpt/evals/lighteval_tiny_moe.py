@@ -1,6 +1,6 @@
 import os
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 
 
@@ -426,10 +426,13 @@ class Lighteval_Tiny_MoE(LightevalModel):
             #    self.model.h[i].attn.key_cache = None
             #    self.model.h[i].attn.value_cache = None
             x = jnp.array(batch.input_ids, device=sharding)
+            max_length = max_new_tokens + x.shape[1] 
             mask = jnp.array(batch.input_mask, dtype=jnp.bool, device=sharding)
-            outputs = generate_slow(self._call_model, x=x, attn_mask=mask, key=self._get_random_key(), max_length=50)
-        #generations = outputs[:, batch.input_ids.shape[1] :]
+            outputs = generate_slow(self.model, x=x, attn_mask=mask, key=self._get_random_key(), max_length=max_length)
+        generations = outputs[:, batch.input_ids.shape[1] :]
         generations = jnp.reshape(outputs, (batch_size, num_samples, -1))
+        generations, len_gens = self.pad_and_gather(generations, num_samples=num_samples)
+        batch.input_ids, len_ids = self.pad_and_gather(batch.input_ids)
 
         # We gather remaining info
         batch.truncated = jnp.array(batch.truncated)
@@ -444,8 +447,13 @@ class Lighteval_Tiny_MoE(LightevalModel):
             decoded_generations = []
             # Ensure the generated responses do not contain the stop sequences.
             for generation in batched_generations:
+                #generation = generation[:, len]
                 result_generations.append(generation)
-                decoded_generation = self.tok_decode(generation)
+                decoded_generation = self.tok_decode([generation])[0]
+
+                for term in stop_tokens:
+                    decoded_generation = decoded_generation.split(term)[0]
+
                 decoded_generations.append(decoded_generation)
 
             cur_response = GenerativeResponse(
@@ -545,7 +553,7 @@ class Lighteval_Tiny_MoE(LightevalModel):
 
 
     def pad_and_gather(
-        self, output_tensor, num_samples: int | None = None
+        self, output_tensor, drop_last_samples: bool = True, num_samples: int | None = None
     ):
         """
         Pads the `output_tensor` to the maximum length and gathers the lengths across processes.
@@ -576,7 +584,8 @@ def main():
              "lighteval|triviaqa|0|0",
              "lighteval|race:high|0|0"]
     #tasks = "helm|piqa|0|0"
-    tasks = "leaderboard|hellaswag|0|0"
+    #tasks = "leaderboard|hellaswag|0|0"
+    tasks = "lighteval|triviaqa|0|0"
 
     key = jax.random.PRNGKey(1337)
     rngs = nnx.Rngs(key)
