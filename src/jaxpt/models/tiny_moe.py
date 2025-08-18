@@ -40,7 +40,7 @@ class Tiny_MoE_Config(Config):
     attention_bias: bool = False  # use bias in attention layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
     glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
-    sdpa_implementation: Literal["xla", "cudnn"] = (
+    sdpa_implementation: Literal["xla", "cudnn", "slow"] = (
         "xla"  # self-attention kernel implementation
     )
     rope_theta: float = 1e-4  # base frequency for rope

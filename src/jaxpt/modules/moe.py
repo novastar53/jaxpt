@@ -157,7 +157,6 @@ class MOE(nnx.Module):
 
     def _collect_outputs(self, expert_outputs, expert_indices, expert_positions, 
                         top_k_probs):
-        T, K, C = expert_outputs.shape
         expert_outputs = expert_outputs[expert_indices, expert_positions]
         expert_outputs = jnp.sum(top_k_probs[..., None] * expert_outputs, axis=1)
         return expert_outputs
