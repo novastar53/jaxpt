@@ -11,20 +11,31 @@ from jaxpt.modules.position import RoPE_Llama
 
 
 def _calc_slow_attn(q, k, v, mask, bias=None):
-    _, T, _, _ = q.shape
+    B, T, n_head, H = q.shape
+    _, _, n_kv_head, _ = k.shape
 
-    if bias is None:
-        bias = jnp.zeros(shape=(T, T), dtype=q.dtype)
+    G = n_head // n_kv_head
 
-    q = jnp.transpose(q, axes=(0, 2, 1, 3))  # (B, n_head, T, hs)
-    k = jnp.transpose(k, axes=(0, 2, 3, 1))  # (B, n_head, hs, T)
-    v = jnp.transpose(v, axes=(0, 2, 1, 3))  # (B, n_head, T, hs)
-    att = (q @ k) + bias
-    att = att / math.sqrt(k.shape[-1])  # B, n_head, T, T
-    att = jnp.where(mask[:, :, :T, :T] == 0.0, float("-inf"), att)
+    q = q.reshape((B, T, n_kv_head, G, H)) # (B, T, n_kv_head, G, hs)
+    q = jnp.transpose(q, axes=(0, 2, 3, 1, 4))  
+
+    k = k.reshape(-1, T, n_kv_head, 1, H) # (B, T, n_kv_head, 1, hs)
+    k = jnp.transpose(k, axes=(0, 2, 3, 4, 1))  
+
+    v = v.reshape(-1, T, n_kv_head, 1, H) # (B, T, n_kv_head, 1, hs)
+    v = jnp.transpose(v, axes=(0, 2, 3, 1, 4))  
+
+    att = (q @ k) / math.sqrt(H) # (B, n_kv_head, G, T, T)
+
+    if bias:
+        att += bias
+
+    mask = jnp.tril(jnp.ones((T, T), dtype=jnp.bool))[None, None, None, ...]
+    att = jnp.where(mask == False, float("-inf"), att)
     att = jax.nn.softmax(att, axis=-1)
-    y = att @ v  # (B, n_head, T, T) x (b, n_head, T, hs) -> (B, n_head, T, hs)
-    y = jnp.transpose(y, axes=(0, 2, 1, 3))  # (B, T, n_head, hs)
+    y = att @ v  
+    y = y.transpose((0, 3, 1, 2, 4)) # (B, T, n_kv_head, G, hs)
+    y = y.reshape(B, T, n_head, H) # (B, T, n_head, hs)
     return y, att
 
 

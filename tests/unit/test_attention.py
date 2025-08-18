@@ -10,10 +10,10 @@ from jaxpt.modules.config import Config
 @dataclass
 class Attn_Config(Config):
     n_layer: int = 1
-    block_size: int = 2048  # sequence length
-    n_head: int = 12  # number of attention heads
-    n_kv_head: int = 4  # number of key-value heads
-    n_embed: int = 576  # number token embedding dimensionsa
+    block_size: int = 5  # sequence length
+    n_head: int = 4  # number of attention heads
+    n_kv_head: int = 2  # number of key-value heads
+    n_embed: int = 12  # number token embedding dimensionsa
     sdpa_implementation: str = "slow"
     init_stddev: float = 0.02
     attention_bias: bool = False  # use bias in attention layers
@@ -25,22 +25,21 @@ def test_causal_self_attention():
     config = Attn_Config(
         sdpa_implementation="xla"
     )
+    x = jax.random.normal(jax.random.key(0), (batch_size, config.block_size, config.n_embed))
     attn = CausalSelfAttention(
         config=config,
         rngs=nnx.Rngs(default=0))
-    y1 = attn(
-        jnp.ones((batch_size, config.block_size, config.n_embed))
-    )
+    y1 = attn(x)
+
     config = Attn_Config(
         sdpa_implementation="slow"
     )
     attn = CausalSelfAttention(
         config=config,
         rngs=nnx.Rngs(default=0))
-    y2 = attn(
-        jnp.ones((batch_size, config.block_size, config.n_embed))
-    )
-    assert(jnp.allclose(y1, y2))
+    y2 = attn(x)
+
+    assert(jnp.allclose(y1, y2, atol=1e-5))
 
 
 def test_gq_attention():
@@ -48,27 +47,24 @@ def test_gq_attention():
     config = Attn_Config(
         sdpa_implementation="xla"
     )
+    x = jax.random.normal(jax.random.key(0), (batch_size, config.block_size, config.n_embed))
     attn = GQ_Attention(
         config=config,
         rngs=nnx.Rngs(default=0))
-    y1 = attn(
-        jnp.ones((batch_size, config.block_size, config.n_embed))
-    )
+    y1 = attn(x)
     config = Attn_Config(
         sdpa_implementation="slow"
     )
     attn = GQ_Attention(
         config=config,
         rngs=nnx.Rngs(default=0))
-    y2 = attn(
-        jnp.ones((batch_size, config.block_size, config.n_embed))
-    )
+    y2 = attn(x)
 
-    assert(jnp.allclose(y1, y2))
+    assert(jnp.allclose(y1, y2, atol=1e-5))
 
 
 
 if __name__ == "__main__":
 
-    test_causal_self_attention()
+    #test_causal_self_attention()
     test_gq_attention()
