@@ -14,6 +14,7 @@ dependencies = [
     "flash-attention-jax>=0.3.1",
     "numpy==1.26.4",
     "more-itertools>=10.7.0",
+    "orbax>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -35,12 +36,14 @@ cuda = [
     #"flax==0.10.6",
     "flax==0.11.1"
 ]
-#metal = [
-#    "jax>=0.5.2",
-#    "flax==0.10.6",
-#    #"jax[cuda12]==0.6.2",
-#    #"flax==0.10.7",
-#]
+metal = [
+    #"jax>=0.5.2",
+    #"flax==0.10.6",
+    #"jax[cuda12]==0.6.2",
+    #"flax==0.10.7",
+    "jax==0.7.0",
+    "flax==0.11.1"
+]
 tpu = [
     "libtpu",
     "cloud-tpu-client",
