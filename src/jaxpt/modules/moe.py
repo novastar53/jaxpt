@@ -12,12 +12,10 @@ spec = PartitionSpec("devices",)
 
 class Experts(nnx.Module):
     def __init__(self, config, rngs):
+        self.config = config
+
         w_c_fc_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02),
-            sharding=spec)
-        
-        b_init = nnx.with_partitioning(
-            nnx.initializers.zeros,
             sharding=spec)
         
         w_c_proj_init = nnx.with_partitioning(
@@ -33,23 +31,11 @@ class Experts(nnx.Module):
             ),
             config.param_dtype
         ))
-        self.b_c_fc = nnx.Param(b_init(rngs.default(),
-        (
-            config.n_experts,
-            1,
-            config.n_mlp_hidden
-        ), config.param_dtype))
-
+        
         self.w_gate = nnx.Param(w_c_fc_init(rngs.default(),
         (
             config.n_experts,
             config.n_embed,
-            config.n_mlp_hidden
-        ), config.param_dtype))
-        self.b_gate = nnx.Param(b_init(rngs.default(),
-        (
-            config.n_experts,
-            1,
             config.n_mlp_hidden
         ), config.param_dtype))
 
@@ -62,31 +48,60 @@ class Experts(nnx.Module):
                     config.n_embed
                 ), config.param_dtype)
         )
-        self.b_c_proj = nnx.Param(
-            b_init(
-                rngs.default(),
-                (
-                    config.n_experts,
-                    1,
-                    config.n_embed
-                ),
-                config.param_dtype
+
+        if config.moe_bias:
+
+            b_init = nnx.with_partitioning(
+                nnx.initializers.zeros,
+                sharding=spec)
+
+            self.b_c_proj = nnx.Param(
+                b_init(
+                    rngs.default(),
+                    (
+                        config.n_experts,
+                        1,
+                        config.n_embed
+                    ),
+                    config.param_dtype
+                )
             )
-        )
-        self.config = config
+
+            self.b_gate = nnx.Param(b_init(rngs.default(),
+            (
+                config.n_experts,
+                1,
+                config.n_mlp_hidden
+            ), config.param_dtype))
+
+            self.b_c_fc = nnx.Param(b_init(rngs.default(),
+            (
+                config.n_experts,
+                1,
+                config.n_mlp_hidden
+            ), config.param_dtype))
+
 
     def __call__(self, x):
-        (x, w_c_fc, b_c_fc, w_gate, 
-        b_gate, w_c_proj, b_c_proj) = dtypes.promote_dtype(
-        (x, self.w_c_fc.value, self.b_c_fc.value, self.w_gate.value, 
-        self.b_gate.value, self.w_c_proj.value, self.b_c_proj.value), dtype=self.config.dtype
+        (x, w_c_fc, w_gate, w_c_proj) = dtypes.promote_dtype(
+        (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value), dtype=self.config.dtype
         )
+        if self.config.moe_bias:
+            (b_c_fc, b_gate, b_c_proj) = dtypes.promote_dtype(
+            (x, self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value), dtype=self.config.dtype
+            )
         x = jax.lax.with_sharding_constraint(x, spec)
-        h = jnp.einsum('eti,eih->eth', x, w_c_fc) + b_c_fc
-        g = jnp.einsum('eti,eih->eth', x, w_gate) + b_gate
+        h = jnp.einsum('eti,eih->eth', x, w_c_fc)
+        if self.config.moe_bias:
+            h += b_c_fc
+        g = jnp.einsum('eti,eih->eth', x, w_gate)
+        if self.config.moe_bias:
+            g += b_gate
         g = nnx.silu(g)
         h = g * h
-        o = jnp.einsum('eth,eho->eto', h, w_c_proj) + b_c_proj
+        o = jnp.einsum('eth,eho->eto', h, w_c_proj)
+        if self.config.moe_bias:
+            o += b_c_proj
         o = jax.lax.with_sharding_constraint(o, spec)
         return o
 

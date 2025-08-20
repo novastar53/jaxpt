@@ -38,6 +38,7 @@ class Tiny_MoE_Config(Config):
     n_mlp_hidden: int = 2304  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
+    moe_bias: bool = True # use bias in moe layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
     glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
     sdpa_implementation: Literal["xla", "cudnn", "slow"] = (
@@ -116,7 +117,6 @@ class MOE_Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -128,6 +128,7 @@ class MOE_Block(nnx.Module):
             ),
             rngs=rngs,
         )
+        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.moe = MOE(config, rngs)
         self.aux_loss = False
 
@@ -188,6 +189,7 @@ class Tiny_MoE(nnx.Module):
         self.aux_loss = False
         self.n_layer = config.n_layer
 
+
     def __call__(self, idx, mask=None):
         x = self.wte(idx)
         total_aux_loss = 0
@@ -210,6 +212,7 @@ class Tiny_MoE(nnx.Module):
         ckptr = ocp.StandardCheckpointer()
         ckptr.save(fpath, other_state)
         ckptr.wait_until_finished()
+
 
     @staticmethod
     def from_checkpoint(
