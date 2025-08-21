@@ -12,7 +12,7 @@ from typing import Literal
 
 import os
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -161,12 +161,13 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=30,
+                     n_layer=4,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
                      n_embed=576,
                      n_mlp_hidden=1536,
+                     moe_bias=False,
                      expert_weight_priority=False,
                      load_factor=2.00,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
@@ -285,11 +286,11 @@ def trapezoidal_schedule(step):
 # First split the model into params and variables
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 # Then create a mask for the weight decay params
-weight_decay_mask = jax.tree_util.tree_map(lambda x: type(x) is nnx.Param and len(x.shape) > 1, params)
+weight_decay_mask = jax.tree_util.tree_map(lambda x: len(x.shape) > 1, params)
 
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
-    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1) #, mask=weight_decay_mask),
     #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
     #optax.adam(trapezoidal_schedule)
 )
