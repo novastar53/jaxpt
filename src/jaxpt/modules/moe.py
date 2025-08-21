@@ -88,7 +88,7 @@ class Experts(nnx.Module):
         )
         if self.config.moe_bias:
             (b_c_fc, b_gate, b_c_proj) = dtypes.promote_dtype(
-            (x, self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value), dtype=self.config.dtype
+            (self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value), dtype=self.config.dtype
             )
         x = jax.lax.with_sharding_constraint(x, spec)
         h = jnp.einsum('eti,eih->eth', x, w_c_fc)
