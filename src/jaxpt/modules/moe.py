@@ -108,6 +108,7 @@ class Experts(nnx.Module):
 
 class MOE(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
+        self.config = config
         self.router_gate = nnx.Linear(
             config.n_embed,
             config.n_experts,
@@ -186,7 +187,7 @@ class MOE(nnx.Module):
         gate_logits = self.router_gate(x) # B, T, n_experts
         if self.add_noise:
             noise = jax.random.normal(self.gate_noise_rngstream(), 
-                                      gate_logits.shape) * (1/self.n_experts)
+                                      gate_logits.shape, dtype=self.config.dtype) * (1/self.n_experts)
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 

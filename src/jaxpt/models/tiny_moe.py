@@ -39,7 +39,7 @@ class Tiny_MoE_Config(Config):
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     moe_bias: bool = True # use bias in moe layers
-    ln_epsilon: float = 1e-5  # constant to prevent division by zero
+    ln_epsilon: float = 1e-6  # constant to prevent division by zero
     glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
     sdpa_implementation: Literal["xla", "cudnn", "slow"] = (
         "xla"  # self-attention kernel implementation
@@ -82,7 +82,6 @@ class GLU_Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,
@@ -94,6 +93,7 @@ class GLU_Block(nnx.Module):
             ),
             rngs=rngs,
         )
+        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.glu = GLU(config, rngs)
 
     def __call__(self, x, mask=None):
@@ -133,7 +133,7 @@ class MOE_Block(nnx.Module):
         self.aux_loss = False
 
     def __call__(self, x, mask=None):
-        x = self.attn(self.rms_n_1(x), mask=mask) + x
+        x = x + self.attn(self.rms_n_1(x), mask=mask)
         if self.aux_loss is True:
             moe_out, moe_aux_loss = self.moe(self.rms_n_2(x))
             x = moe_out + x
