@@ -146,7 +146,6 @@ from flax import nnx
 
 from pprint import pprint
 
-from jaxpt.infer import generate_completions, generate
 from jaxpt.models import Tiny_MoE_Config, Tiny_MoE
 from jaxpt.utils import count_params, create_sharded_model
 
@@ -286,7 +285,7 @@ def trapezoidal_schedule(step):
 # First split the model into params and variables
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 # Then create a mask for the weight decay params
-weight_decay_mask = jax.tree_util.tree_map(lambda x: len(x.shape) > 1, params)
+weight_decay_mask = jax.tree_util.tree_map(lambda x: type(x) is nnx.Param and len(x.shape) > 1, params)
 
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
@@ -294,7 +293,7 @@ tx = optax.chain(
     #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
     #optax.adam(trapezoidal_schedule)
 )
-optimizer = nnx.Optimizer(m, tx)
+optimizer = nnx.ModelAndOptimizer(m, tx, wrt=nnx.Param)
 
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
 
