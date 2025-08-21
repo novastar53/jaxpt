@@ -169,14 +169,14 @@ config = Tiny_MoE_Config(
                      n_embed=576,
                      n_mlp_hidden=1536,
                      expert_weight_priority=False,
-                     load_factor=1.25,
+                     load_factor=2.00,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
 with mesh:
-    #m = create_sharded_model(Tiny_MoE, config, rngs)
+    m = create_sharded_model(Tiny_MoE, config, rngs)
     #m = load_checkpoint(Tiny_MoE, output_dir, config, "run_20250726_excudate_quilling", 2680, rngs)
-    m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
+    #m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
     #m = from_hf_pretrained(config, rngs)
 
     graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
@@ -233,7 +233,7 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(173e9)
+  num_tokens: int = int(228e9)
   num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 32 * num_devices
   T: int = 2048
