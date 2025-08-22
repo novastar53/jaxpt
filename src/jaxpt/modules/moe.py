@@ -84,12 +84,12 @@ class Experts(nnx.Module):
 
     def __call__(self, x):
         (x, w_c_fc, w_gate, w_c_proj) = dtypes.promote_dtype(
-        (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value), dtype=self.config.dtype
+            (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value), dtype=self.config.dtype
         )
         if self.config.moe_bias:
             (b_c_fc, b_gate, b_c_proj) = dtypes.promote_dtype(
             (self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value), dtype=self.config.dtype
-            )
+        )
         x = jax.lax.with_sharding_constraint(x, spec)
         h = jnp.einsum('eti,eih->eth', x, w_c_fc)
         if self.config.moe_bias:

@@ -161,7 +161,7 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=30,
+                     n_layer=4,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -197,9 +197,9 @@ import orbax.checkpoint as ocp
 
 # Set up save and load optimizer
 
-def save_optimizer_state(optimizer):
+def save_optimizer_state(m, optimizer):
   state_dirpath = (
-    output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname
+    output_dir / m.config.name / "optimizer_checkpoints" / run_dirname
   )
   state_dirpath.mkdir(parents=True, exist_ok=True)
   _, state = nnx.split(optimizer)
@@ -234,9 +234,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
+  num_tokens_per_batch: int = 2**14 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 16 * num_devices
-  T: int = 2048
+  T: int = 128
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -284,9 +284,10 @@ def trapezoidal_schedule(step):
 
 # Generate a weight decay mask
 # First split the model into params and variables
+#graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 # Then create a mask for the weight decay params
-weight_decay_mask = jax.tree_util.tree_map(lambda x: len(x.shape) > 1, params)
+weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
@@ -294,7 +295,7 @@ tx = optax.chain(
     #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
     #optax.adam(trapezoidal_schedule)
 )
-optimizer = nnx.ModelAndOptimizer(m, tx, wrt=nnx.Param)
+optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
 
@@ -378,12 +379,12 @@ def moe_loss_fn(model, batch, targets):
     return loss, aux_loss
 
 
-@nnx.jit
+#@nnx.jit
 def train_step(model, optimizer, batch, target):
     batch = batch.squeeze()
     target = target.squeeze()
     (loss, aux_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
-    optimizer.update(grads)
+    optimizer.update(model, grads)
     return loss, aux_loss
 
 
@@ -439,5 +440,5 @@ with mesh:
     plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
 
     save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-    save_optimizer_state(optimizer)
+    save_optimizer_state(m, optimizer)
     print("Done.")
