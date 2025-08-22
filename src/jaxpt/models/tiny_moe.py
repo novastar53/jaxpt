@@ -47,7 +47,6 @@ class Tiny_MoE_Config(Config):
     rope_theta: float = 1e-4  # base frequency for rope
     init_stddev: float = 0.02  # stddev for layer init
     use_cache: bool = False  # use kv caching
-    pad_token: str = "<pad>"
 
     glu_fc_kernel_sharding: tuple = (None,)
     glu_fc_bias_sharding: tuple = (None,)

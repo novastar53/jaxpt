@@ -12,7 +12,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -161,7 +161,7 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=4,
+                     n_layer=30,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -234,14 +234,14 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**14 # 2**19, 0.5 million as per the GPT 3.5 paper
+  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 16 * num_devices
-  T: int = 128
+  T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
-  warmup_steps: int = 2500
+  warmup_steps: int = 9000
   print_interval: int = 100
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
@@ -379,7 +379,7 @@ def moe_loss_fn(model, batch, targets):
     return loss, aux_loss
 
 
-#@nnx.jit
+@nnx.jit
 def train_step(model, optimizer, batch, target):
     batch = batch.squeeze()
     target = target.squeeze()
