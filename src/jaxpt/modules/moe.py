@@ -191,7 +191,7 @@ class MOE(nnx.Module):
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 
-        expert_capacity_per_batch = int(self.load_factor * self.top_k * max(1, T // self.n_experts))
+        expert_capacity_per_batch = int(self.load_factor * self.top_k * max(1, T / self.n_experts))
         (top_k_probs, 
          expert_positions, 
          expert_indices, 

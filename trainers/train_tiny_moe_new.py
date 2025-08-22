@@ -169,7 +169,7 @@ config = Tiny_MoE_Config(
                      n_mlp_hidden=1536,
                      moe_bias=False,
                      expert_weight_priority=False,
-                     load_factor=2.00,
+                     load_factor=1.1,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
@@ -234,8 +234,8 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 16 * num_devices
+  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 32 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
