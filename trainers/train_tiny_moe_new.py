@@ -5,14 +5,13 @@
 
 # ### Configure the machine and install packages
 
-# In[1]:
 
 
 from typing import Literal
 
 import os
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -27,7 +26,6 @@ if any(d.platform == "tpu" for d in devices):
 print(f"Running on {platform}")
 
 
-# In[2]:
 
 from pathlib import Path
 import sys
@@ -38,7 +36,6 @@ sys.path.append(jaxpt_dir)
 print(f"Jaxpt dir {jaxpt_dir}")
 
 
-# In[3]:
 
 
 import os
@@ -112,12 +109,7 @@ mesh = jax.sharding.Mesh(jax.devices(), ["devices"])
 
 # ### Initialize the model and perform a sanity check
 
-# In[4]:
-
-
 from datetime import datetime
-import random
-import string
 
 from jaxpt.checkpointers import save_checkpoint, load_checkpoint, load_checkpoint_from_gcloud
 from jaxpt.utils import generate_readable_code
@@ -134,15 +126,7 @@ random_code = generate_readable_code()
 run_dirname = f"run_{timestamp}_{random_code}"
 print(f"Run: {run_dirname}")
 
-
-
-# In[5]:
-
-
 from flax import nnx
-
-
-# In[6]:
 
 from pprint import pprint
 
@@ -155,13 +139,12 @@ from transformers import AutoTokenizer
 default = jax.random.key(1337)
 gate_noise = jax.random.key(42)
 rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
-rngs = nnx.Rngs(0)
 
 config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=30,
+                     n_layer=4,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -190,7 +173,6 @@ with mesh:
   
 # ### Configure Training Run
 
-# In[7]:
 
 
 import orbax.checkpoint as ocp
@@ -220,7 +202,6 @@ def load_optimizer_state(model, optimizer, run_dirname, step):
   return optimizer
 
 
-# In[8]:
 
 
 import dataclasses
@@ -234,9 +215,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 32 * num_devices
-  T: int = 2048
+  num_tokens_per_batch: int = 2**12 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 2 * num_devices
+  T: int = 128
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -284,21 +265,17 @@ def trapezoidal_schedule(step):
 
 # Generate a weight decay mask
 # First split the model into params and variables
-#graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 # Then create a mask for the weight decay params
 weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    #optax.clip_by_global_norm(trconf.max_grad_norm),
+    optax.clip_by_global_norm(trconf.max_grad_norm),
     optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
-    #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
-    #optax.adam(trapezoidal_schedule)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
-
 
 # count the number of weight decay params
 def f(x, y):
@@ -317,9 +294,6 @@ print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trc
 # ### DataLoader and Validation Setup
 # 
 # 
-
-# In[9]:
-
 
 import os
 
@@ -345,12 +319,10 @@ train_dl = BlendedCloudDataLoader(
     "smollm-corpus/processed/python-edu",
     "smollm-corpus/processed/cosmopedia-v2"],
     proportions=[85, 1, 12],
-    start_shards=[545, 7, 76],
     label="train"
 )
 
 
-# In[10]:
 
 
 from jaxpt.utils import append_to_csv
@@ -365,8 +337,6 @@ append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "time
 print(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
-
-# In[22]:
 
 import time
 
@@ -398,6 +368,7 @@ with mesh:
       batch = jax.device_put(batch.squeeze(), data_sharding)
       target = jax.device_put(target.squeeze(), data_sharding)
       avg_loss, aux_loss = train_step(m, optimizer, batch, target)
+      jax.debug.breakpoint()
       iter_time = time.time() - start
       if step % trconf.print_interval == 0:
         if not start:
