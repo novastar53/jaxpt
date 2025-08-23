@@ -96,8 +96,8 @@ class GLU_Block(nnx.Module):
         self.glu = GLU(config, rngs)
 
     def __call__(self, x, mask=None):
-        x = self.attn(self.rms_n_1(x), mask=mask) + x
-        x = self.glu(self.rms_n_2(x)) + x
+        x = x + self.attn(self.rms_n_1(x), mask=mask)
+        x = x + self.glu(self.rms_n_2(x))
         return x
 
 
@@ -135,11 +135,10 @@ class MOE_Block(nnx.Module):
         x = x + self.attn(self.rms_n_1(x), mask=mask)
         if self.aux_loss is True:
             moe_out, moe_aux_loss = self.moe(self.rms_n_2(x))
-            x = moe_out + x
+            x = x + moe_out
             return x, moe_aux_loss
         else:
-            moe_out = self.moe(self.rms_n_2(x))
-            x = moe_out + x
+            x = x + self.moe(self.rms_n_2(x))
             return x
 
 

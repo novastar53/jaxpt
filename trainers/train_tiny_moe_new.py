@@ -144,7 +144,7 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=4,
+                     n_layer=2,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -215,7 +215,7 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**12 # 2**19, 0.5 million as per the GPT 3.5 paper
+  num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 2 * num_devices
   T: int = 128
   max_steps: int = int(num_tokens // num_tokens_per_batch)
@@ -223,7 +223,7 @@ class TrainerConfig:
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = 9000
-  print_interval: int = 100
+  print_interval: int = 10 
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
@@ -234,6 +234,7 @@ class TrainerConfig:
 ##############
 
 trconf = TrainerConfig()
+assert(trconf.grad_accumulation_steps == 1)
 '''
 trconf = TrainerConfig(
   num_tokens_per_batch=2**9,
@@ -257,7 +258,7 @@ trconf.grad_accumulation_steps =  trconf.num_tokens_per_batch // (trconf.mB * tr
 def trapezoidal_schedule(step):
 
     warmup_lr = trconf.max_lr * (step + 1) / trconf.warmup_steps
-    cooldown_lr = trconf.max_lr * (trconf.max_steps - step) / (trconf.max_steps - 0.8 * trconf.max_steps)
+    cooldown_lr = trconf.max_lr * (trconf.max_steps - step - 1) / (0.2 * trconf.max_steps)
 
     return jnp.where(step < trconf.warmup_steps,
                      warmup_lr,
@@ -351,8 +352,6 @@ def moe_loss_fn(model, batch, targets):
 
 @nnx.jit
 def train_step(model, optimizer, batch, target):
-    batch = batch.squeeze()
-    target = target.squeeze()
     (loss, aux_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
     return loss, aux_loss
@@ -368,18 +367,15 @@ with mesh:
       batch = jax.device_put(batch.squeeze(), data_sharding)
       target = jax.device_put(target.squeeze(), data_sharding)
       avg_loss, aux_loss = train_step(m, optimizer, batch, target)
-      jax.debug.breakpoint()
-      iter_time = time.time() - start
       if step % trconf.print_interval == 0:
         if not start:
           start = time.time()
-          iter_time = -1
-          sub_step_time = -1
-          tokens_per_sec = -1
+          iter_time = 0
+          tokens_per_sec = 0
         else:
-          iter_time = (time.time() - start) / trconf.print_interval
-          sub_step_time = iter_time / trconf.grad_accumulation_steps
-          tokens_per_sec = trconf.mB * trconf.T * trconf.grad_accumulation_steps / iter_time
+          total_time = (time.time() - start)
+          iter_time =  total_time / trconf.print_interval
+          tokens_per_sec = trconf.print_interval * trconf.mB * trconf.T * trconf.grad_accumulation_steps / total_time
 
         tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
         lr = trapezoidal_schedule(step)
@@ -392,7 +388,7 @@ with mesh:
               f"aux_loss: {aux_loss:0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
-              f"tok/sec: {tokens_per_sec:,.2f}", end="\r")
+              f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
         start = time.time()
       if step > 0 and step % trconf.eval_interval == 0:
         print("Evaluation TBD")
