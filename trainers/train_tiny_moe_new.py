@@ -11,7 +11,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -144,15 +144,16 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=2,
+                     n_layer=30,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
                      n_embed=576,
                      n_mlp_hidden=1536,
-                     moe_bias=False,
+                     moe_bias=True,
+                     mlp_bias=True,
                      expert_weight_priority=False,
-                     load_factor=1.1,
+                     load_factor=1.25,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
@@ -214,16 +215,16 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(228e9)
-  num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 2 * num_devices
-  T: int = 128
+  num_tokens: int = int(236e9)
+  num_tokens_per_batch: int = 2**20 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 64 * num_devices
+  T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
-  warmup_steps: int = 9000
-  print_interval: int = 10 
+  warmup_steps: int = max_steps // 100
+  print_interval: int = 100
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
@@ -334,7 +335,7 @@ log_dir.mkdir(parents=True, exist_ok=True)
 print(f"Log directory: {log_dir}")
 
 train_losses = []
-append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "time", "tokens_processed", "tokens_per_sec"])
+append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "aux_loss", "time", "tokens_processed", "tokens_per_sec"])
 print(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
@@ -382,10 +383,10 @@ with mesh:
         avg_loss = avg_loss.item()
 
         train_losses.append((step, avg_loss))
-        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, iter_time*1000, tokens_processed, tokens_per_sec])
+        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr.item(), avg_loss, aux_loss.item(), iter_time*1000, tokens_processed, tokens_per_sec])
         print(f"{step} | lr: {lr:0.4f} | "
               f"loss: {avg_loss:0.4f} | "
-              f"aux_loss: {aux_loss:0.4f} | "
+              f"aux_loss: {aux_loss.item():0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
               f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
