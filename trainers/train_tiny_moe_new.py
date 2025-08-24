@@ -15,6 +15,13 @@ import os
 
 import jax
 
+import logging
+from pprint import pformat
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 platform : Literal["darwin", "colab", "cuda", "tpu"] = "darwin"
 
 devices = jax.devices()
@@ -23,7 +30,7 @@ if any(d.platform == "gpu" for d in devices):
 if any(d.platform == "tpu" for d in devices):
     platform = "tpu"
 
-print(f"Running on {platform}")
+logger.info(f"Running on {platform}")
 
 
 
@@ -33,7 +40,9 @@ import sys
 jaxpt_dir = str(Path().absolute().parent / "src" )
 
 sys.path.append(jaxpt_dir)
-print(f"Jaxpt dir {jaxpt_dir}")
+
+
+logger.info(f"Jaxpt dir {jaxpt_dir}")
 
 
 
@@ -50,12 +59,12 @@ import jax.numpy as jnp
 import numpy as np
 
 # Hardware setup
-print("JAX version:", jax.__version__)
-print("Flax version", flax.__version__)
+logger.info(f"JAX version: {jax.__version__}")
+logger.info(f"Flax version: {flax.__version__}")
 
 devices = jax.devices()
 num_devices = len(devices)
-print("Available devices:", num_devices)
+logger.info(f"Available devices: {num_devices}")
 
 requested_device = "gpu"
 
@@ -65,7 +74,7 @@ device = jax.default_backend()
 if device != requested_device:
     warnings.warn(f"not using {requested_device}. Using {device}")
 else:
-    print(f"using {device}")
+    logger.info(f"using {device}")
 
 
 #####################################
@@ -118,13 +127,13 @@ if platform == "cuda":
   output_dir = Path("/workspace/alpha_training_runs") # Lambda Labs setup
 else:
   output_dir = Path().absolute().parent  / "alpha_training_runs" # Local setup
-print(f"Output dir: {output_dir}")
+logger.info(f"Output dir: {output_dir}")
 
 timestamp = datetime.now().strftime("%Y%m%d")
 random_code = generate_readable_code()
 
 run_dirname = f"run_{timestamp}_{random_code}"
-print(f"Run: {run_dirname}")
+logger.info(f"Run: {run_dirname}")
 
 from flax import nnx
 
@@ -150,7 +159,7 @@ config = Tiny_MoE_Config(
                      n_kv_head=3,
                      n_embed=576,
                      n_mlp_hidden=1536,
-                     moe_bias=True
+                     moe_bias=True,
                      mlp_bias=False,
                      attention_bias=False,
                      expert_weight_priority=False,
@@ -169,9 +178,9 @@ with mesh:
     total_params = count_params(m)
     moe_params = count_params(m, "moe")
 
-    print(f"Parameter Count: {total_params:,}")
-    print(f"MOE Parameter Count: {moe_params:,}")
-    print(f"Replicated Parameter Count: {total_params - moe_params:,}")
+    logger.info(f"Parameter Count: {total_params:,}")
+    logger.info(f"MOE Parameter Count: {moe_params:,}")
+    logger.info(f"Replicated Parameter Count: {total_params - moe_params:,}")
 
   
 # ### Configure Training Run
@@ -190,7 +199,7 @@ def save_optimizer_state(m, optimizer):
   _, state = nnx.split(optimizer)
   state.model = None
   cp = ocp.StandardCheckpointer()
-  print(f"Saving optimizer state to {state_dirpath}/step-{optimizer.step.value.item()}")
+  logger.info(f"Saving optimizer state to {state_dirpath}/step-{optimizer.step.value.item()}")
   cp.save(state_dirpath / f"step-{optimizer.step.value.item()}", state)
   cp.wait_until_finished()
 
@@ -289,10 +298,10 @@ def f(x, y):
 
 weight_decay_params = jax.tree_util.tree_map(f, weight_decay_mask, params)
 weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_decay_params, 0)
-print(f"weight decay param count: {weight_decay_param_count:,}")
-pprint(trconf)
-print(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
-print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trconf.mB // num_devices)
+logger.info(f"weight decay param count: {weight_decay_param_count:,}")
+logger.info("Model Config:\n%s", pformat(trconf))
+logger.info(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
+logger.info(f"effective batch size per device: {trconf.grad_accumulation_steps * trconf.mB // num_devices}")
 
 
 # ### DataLoader and Validation Setup
@@ -334,11 +343,11 @@ from jaxpt.utils import append_to_csv
 # Create log dir
 log_dir = output_dir / m.config.name / "logs"
 log_dir.mkdir(parents=True, exist_ok=True)
-print(f"Log directory: {log_dir}")
+logger.info(f"Log directory: {log_dir}")
 
 train_losses = []
 append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "aux_loss", "time", "tokens_processed", "tokens_per_sec"])
-print(f"Starting from step: {optimizer.step.value.item()}")
+logger.info(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
 
@@ -386,21 +395,21 @@ with mesh:
 
         train_losses.append((step, avg_loss))
         append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr.item(), avg_loss, aux_loss.item(), iter_time*1000, tokens_processed, tokens_per_sec])
-        print(f"{step} | lr: {lr:0.4f} | "
-              f"loss: {avg_loss:0.4f} | "
-              f"aux_loss: {aux_loss.item():0.4f} | "
-              f"time: {iter_time*1000:0.2f}ms | "
-              f"tokens processed: {tokens_processed:,} | "
-              f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
+        logger.info(f"{step} | lr: {lr:0.4f} | "
+                    f"loss: {avg_loss:0.4f} | "
+                    f"aux_loss: {aux_loss.item():0.4f} | "
+                    f"time: {iter_time*1000:0.2f}ms | "
+                    f"tokens processed: {tokens_processed:,} | "
+                    f"tok/sec: {tokens_per_sec:,.2f}")
         start = time.time()
       if step > 0 and step % trconf.eval_interval == 0:
-        print("Evaluation TBD")
+        logger.info("Evaluation TBD")
       if step > 0 and step % trconf.checkpoint_interval == 0:
-        print(f"Saving checkpoint at step {step}")
+        logger.info(f"Saving checkpoint at step {step}")
         save_checkpoint(m, output_dir, run_dirname, step)
         #save_optimizer_state(optimizer)
   except KeyboardInterrupt:
-      print("Received KeyboardInterrupt. Exiting...")
+      logger.info("Received KeyboardInterrupt. Exiting...")
   finally:
     plt.figure(figsize=(7, 5))
     plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
@@ -411,4 +420,4 @@ with mesh:
 
     save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
     save_optimizer_state(m, optimizer)
-    print("Done.")
+    logger.info("Done.")
