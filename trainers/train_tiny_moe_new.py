@@ -150,10 +150,12 @@ config = Tiny_MoE_Config(
                      n_kv_head=3,
                      n_embed=576,
                      n_mlp_hidden=1536,
-                     moe_bias=True,
-                     mlp_bias=True,
+                     moe_bias=True
+                     mlp_bias=False,
+                     attention_bias=False,
                      expert_weight_priority=False,
                      load_factor=1.25,
+                     ln_epsilon = 1e-5,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
