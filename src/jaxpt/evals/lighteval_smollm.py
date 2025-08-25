@@ -10,81 +10,39 @@ import flax.nnx as nnx
 from jaxpt.models.smol_lm import SmolLM, SmolLM_Config, convert_to_hf
 from jaxpt.checkpointers import load_checkpoint_from_gcloud
 
-
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
 from lighteval.models.transformers.transformers_model import (
     TransformersModelConfig,
 )
 from lighteval.logging.evaluation_tracker import EvaluationTracker
-import argparse
+from lighteval.metrics.metrics import Metrics
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run LightEval evaluation pipeline"
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="results/",
-        help="Directory to write JSON/parquet results",
-    )
-    parser.add_argument(
-        "--save_details",
-        action="store_true",
-        help="Include per-sample logs in output",
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload results to the Hugging Face Hub",
-    )
-    parser.add_argument(
-        "--max_samples",
-        type=int,
-        default=None,
-        help="Limit the total number of examples to evaluate",
-    )
-    parser.add_argument(
-        "--launcher_type",
-        type=str,
-        default=ParallelismManager.ACCELERATE,
-        help="Parallelism launcher type (e.g., ACCELERATE)",
-    )
-    parser.add_argument(
-        "--tasks",
-        type=str,
-        #default="lighteval|arc:easy|0|0,leaderboard|arc:challenge|0|0,helm|piqa|0|0,helm|siqa|0|0,leaderboard|hellaswag|0|0,helm|openbookqa|0|0,leaderboard|winogrande|0|0,lighteval|triviaqa|0|0,lighteval|race:high|0|0",
-        default="leaderboard|hellaswag|0|0",
-        help="Comma-separated list of tasks to run",
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        help="Pretrained model identifier or path for TransformersModelConfig",
-    )
-    return parser.parse_args()
 
 
 def main():
-    args = parse_args()
+    output_dir = "results/"
+    save_details = True
+    push_to_hub = False
+    max_samples = None
+    launcher_type = ParallelismManager.ACCELERATE
 
-    key = jax.random.PRNGKey(1337)
-    rngs = nnx.Rngs(key)
-    config = SmolLM_Config(dtype=jnp.float16, \
-                        vocab_size=49152,
-                        n_embed=576,
-                        n_head=9,
-                        n_kv_head=3,
-                        n_mlp_hidden=1536,
-                        sdpa_implementation="xla")
 
-    output_dir = Path("/workspace/").absolute()
-    #m = load_checkpoint_from_gcloud(SmolLM, config, output_dir, "alpha_training_runs", "run_20250721_wrbyxb", "10000", rngs)
-    #m = convert_to_hf(m)
-    #m = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+    tasks = [
+        "lighteval|triviaqa|0|0",
+        "lighteval|arc:easy|0|0",
+        "leaderboard|arc:challenge|0|0",
+        "helm|piqa|0|0",
+        "leaderboard|hellaswag|0|0",
+        "helm|openbookqa|0|0",
+        "leaderboard|winogrande|0|0",
+    ]
+
+    tasks = [
+        "custom|hellaswag|0|1",
+    ]
 
     model_cfg = TransformersModelConfig(
         model_name="HuggingFaceTB/SmolLM-135M",
@@ -95,17 +53,16 @@ def main():
     )
 
     tracker = EvaluationTracker(
-        output_dir=args.output_dir,
-        save_details=args.save_details,
-        push_to_hub=args.push_to_hub,
+        output_dir=output_dir,
+        save_details=save_details,
+        push_to_hub=push_to_hub,
     )
 
     params = PipelineParameters(
-        launcher_type=args.launcher_type,
-        max_samples=args.max_samples,
+        launcher_type=launcher_type,
+        max_samples=max_samples,
+        custom_tasks_directory="/Users/vikram/dev/jaxpt/src/jaxpt/evals/lighteval/tasks/"
     )
-
-    tasks = args.tasks.split(",")
 
     pipeline = Pipeline(
         tasks=",".join(tasks),

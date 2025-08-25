@@ -49,13 +49,13 @@ def _predict(model: GPT, tokens, mask):
 
 
 class HellaSwag:
-    def __init__(self, model: GPT2LMHeadModel | FlaxGPT2LMHeadModel | GPT):
+    def __init__(self, model, batch_size=8):
         _download_hellaswag()
         self.file = open(
             os.path.join(DATA_CACHE_DIR, "hellaswag_val.jsonl"), "r"
         )
         self.tokenizer = tiktoken.get_encoding("gpt2")
-        self.batch_size = 4
+        self.batch_size = batch_size
         self.idx = 0
         self.model = model
 
@@ -63,14 +63,42 @@ class HellaSwag:
         return self
 
     def __next__(self):
-        line = self.file.readline()
-        if line:
-            example = json.loads(line)
+        examples = []
+        for _ in range(self.batch_size):
+            line = self.file.readline()
+            if not line:
+                break
+            examples.append(json.loads(line))
+        if not examples:
+            self.file.close()
+            raise StopIteration
+
+        # Process all examples in the batch
+        batch_tokens, batch_masks, batch_labels = [], [], []
+        for example in examples:
             tokens, mask, label = self.__process_example(example)
-            pred = _predict(model, tokens, mask)
-            return example, pred, label
-        self.file.close()
-        raise StopIteration
+            batch_tokens.append(tokens)
+            batch_masks.append(mask)
+            batch_labels.append(label)
+
+        # Pad tokens and masks to the same shape for batching
+        # Each tokens/mask is (num_endings, seq_len), batch_tokens is list of (num_endings, seq_len)
+        # Find max num_endings and max seq_len in the batch
+        max_num_endings = max(t.shape[0] for t in batch_tokens)
+        max_seq_len = max(t.shape[1] for t in batch_tokens)
+        batch_size = len(batch_tokens)
+
+        tokens_batch = jnp.zeros((batch_size, max_num_endings, max_seq_len), dtype=jnp.int32)
+        masks_batch = jnp.zeros((batch_size, max_num_endings, max_seq_len))
+        for i, (t, m) in enumerate(zip(batch_tokens, batch_masks)):
+            n_end, seq_len = t.shape
+            tokens_batch = tokens_batch.at[i, :n_end, :seq_len].set(t)
+            masks_batch = masks_batch.at[i, :n_end, :seq_len].set(m)
+
+        # batch_labels is a list of ints
+        preds = _predict(self.model, tokens_batch, masks_batch)
+
+        return examples, preds, batch_labels
 
     def __process_example(self, example):
         prompt = example["ctx"]
@@ -82,7 +110,7 @@ class HellaSwag:
         ]
 
         len_prompt = len(prompt_tokens)
-        max_ending_len = max(len(ending) for ending in endings)
+        max_ending_len = max(len(ending) for ending in ending_tokens)
         mask = jnp.zeros((len(endings), len_prompt + max_ending_len))
         tokens = jnp.zeros(
             (len(endings), len_prompt + max_ending_len), dtype=jnp.int32

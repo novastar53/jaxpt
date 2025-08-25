@@ -231,8 +231,8 @@ class MOE(nnx.Module):
         y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
 
         if self.aux_loss is True:
-            frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T)
-            frac_router_probs = jnp.sum(gate_probs, axis=(0, 1)) / (B * T)
+            frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T) # distribution of tokens across experts
+            frac_router_probs = jnp.sum(gate_probs, axis=(0, 1)) / (B * T) # distribution of gate probabilities across experts
             aux_loss = jnp.sum(frac_tokens * frac_router_probs) * self.n_experts
 
             return y_pred, aux_loss
