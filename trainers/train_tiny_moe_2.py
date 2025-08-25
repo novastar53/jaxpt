@@ -230,15 +230,15 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(111790*1000)
-  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 16 * num_devices
+  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 32 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 5e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
-  print_interval: int = 1
+  print_interval: int = 50
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
