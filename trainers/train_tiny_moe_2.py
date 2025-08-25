@@ -169,7 +169,7 @@ config = Tiny_MoE_2_Config(
                      n_embed=672,
                      n_mlp_hidden=2048,
                      expert_weight_priority=False,
-                     load_factor=1.25,
+                     load_factor=1.5,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
