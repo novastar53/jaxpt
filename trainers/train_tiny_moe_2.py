@@ -13,6 +13,7 @@ from typing import Literal
 import os
 
 #os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 
 import jax
 
@@ -229,44 +230,21 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(111790*1000)
-  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
+  num_tokens: int = int(236e9)
+  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
   mB: int = 32 * num_devices
   T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 5e-4
+  max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
-  print_interval: int = 50
+  print_interval: int = 100
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
 
-
-##############
-# CPU Config #
-##############
-
 trconf = TrainerConfig()
-'''
-trconf = TrainerConfig(
-  num_tokens_per_batch=2**9,
-  mB=2**4,
-  T=2**5,
-  max_steps=9*48, # 6 epoch(s)
-  max_lr=6e-4,
-  min_lr=6e-5,
-  max_grad_norm=1.0,
-  warmup_steps=10,
-  print_interval=1,
-  eval_interval=50,
-  checkpoint_interval=0,
-
-)
-
-trconf.grad_accumulation_steps =  trconf.num_tokens_per_batch // (trconf.mB * trconf.T * num_devices) # Number of steps over which to average the gradient
-'''
 
 # Set up the optimizer
 def trapezoidal_schedule(step):
@@ -282,15 +260,14 @@ def trapezoidal_schedule(step):
 # First split the model into params and variables
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 # Then create a mask for the weight decay params
-weight_decay_mask = jax.tree_util.tree_map(lambda x: len(x.shape) > 1, params)
+weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    #optax.clip_by_global_norm(trconf.max_grad_norm),
-    #optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
-    optax.adam(trapezoidal_schedule)
+    optax.clip_by_global_norm(trconf.max_grad_norm),
+    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    #optax.adam(trapezoidal_schedule)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
-
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
 
 
@@ -317,15 +294,27 @@ print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trc
 
 import os
 
-from jaxpt.dataloaders import DataLoader
+from jaxpt.dataloaders import DataLoader, BlendedCloudDataLoader
 
-train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
-                      batch_size=trconf.mB,
-                      block_size=trconf.T,
-                      device_rank=1,
-                      label="train")
+#train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
+#                      batch_size=trconf.mB,
+#                      block_size=trconf.T,
+#                      device_rank=1,
+#                      label="train")
+#
 
 
+train_dl = BlendedCloudDataLoader(
+    device_rank=1,
+    block_size=trconf.T,
+    batch_size=trconf.mB,
+    bucket_names=["jaxpt_datasets", "jaxpt_datasets", "jaxpt_datasets"],
+    bucket_prefixes=["smollm-corpus/processed/fineweb-edu-dedup",
+    "smollm-corpus/processed/python-edu",
+    "smollm-corpus/processed/cosmopedia-v2"],
+    proportions=[85, 1, 12],
+    label="train"
+)
 # In[10]:
 
 
