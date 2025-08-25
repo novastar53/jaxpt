@@ -12,7 +12,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -161,12 +161,12 @@ config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=50304,
-                     n_layer=2,
+                     n_layer=32,
                      block_size=2048,
-                     n_head=9,
-                     n_kv_head=3,
-                     n_embed=576,
-                     n_mlp_hidden=1536,
+                     n_head=12,
+                     n_kv_head=4,
+                     n_embed=768,
+                     n_mlp_hidden=2304,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
@@ -229,12 +229,12 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(111790*100)
-  num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 2 * num_devices
-  T: int = 128
+  num_tokens: int = int(111790*1000)
+  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 16 * num_devices
+  T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 1e-2
+  max_lr: float = 5e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
@@ -289,7 +289,7 @@ tx = optax.chain(
     #optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
     optax.adam(trapezoidal_schedule)
 )
-optimizer = nnx.Optimizer(m, tx)
+optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
 
@@ -360,7 +360,7 @@ def train_step(model, optimizer, batch, target):
     batch = batch.squeeze()
     target = target.squeeze()
     (loss, aux_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
-    optimizer.update(grads)
+    optimizer.update(model, grads)
     return loss, aux_loss
 
 
@@ -397,7 +397,7 @@ with mesh:
               f"aux_loss: {aux_loss:0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
-              f"tok/sec: {tokens_per_sec:,.2f}", end="\r")
+              f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
         start = time.time()
       if step > 0 and step % trconf.eval_interval == 0:
         print("Evaluation TBD")
