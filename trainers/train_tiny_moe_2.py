@@ -161,12 +161,12 @@ config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=50304,
-                     n_layer=32,
+                     n_layer=30,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
-                     n_embed=768,
-                     n_mlp_hidden=2304,
+                     n_embed=672,
+                     n_mlp_hidden=2048,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
@@ -232,7 +232,7 @@ class TrainerConfig:
   num_tokens: int = int(111790*1000)
   num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 32 * num_devices
-  T: int = 2048
+  T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 5e-4
   min_lr: float = max_lr * 0.1
