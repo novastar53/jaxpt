@@ -174,9 +174,9 @@ config = Tiny_MoE_Config(
 pprint(config)
 
 with mesh:
-    #m = create_sharded_model(Tiny_MoE, config, rngs)
+    m = create_sharded_model(Tiny_MoE, config, rngs)
     #m = load_checkpoint(Tiny_MoE, output_dir, config, "run_20250726_excudate_quilling", 2680, rngs)
-    m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
+    #m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
     #m = from_hf_pretrained(config, rngs)
 
     graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
@@ -233,15 +233,15 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(173e9)
-  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 32 * num_devices
+  num_tokens: int = int(236e9)
+  num_tokens_per_batch: int = 2**20 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 64 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 6e-4
+  max_lr: float = 3e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
-  warmup_steps: int = 2500
+  warmup_steps: int = max_steps // 100
   print_interval: int = 100
   eval_interval: int = 5000
   checkpoint_interval: int = 10000
@@ -289,7 +289,7 @@ graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree_util.tree_map(lambda x: len(x.shape) > 1, params)
 
 tx = optax.chain(
-    #optax.clip_by_global_norm(trconf.max_grad_norm),
+    optax.clip_by_global_norm(trconf.max_grad_norm),
     optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
     #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
     #optax.adam(trapezoidal_schedule)
@@ -391,6 +391,7 @@ with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
   m.train(add_noise=True, aux_loss=True)
   try:
+    step = 0
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
       batch, target = train_dl()
@@ -420,7 +421,7 @@ with mesh:
               f"aux_loss: {aux_loss:0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
-              f"tok/sec: {tokens_per_sec:,.2f}", end="\r")
+              f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
         start = time.time()
       if step > 0 and step % trconf.eval_interval == 0:
         print("Evaluation TBD")

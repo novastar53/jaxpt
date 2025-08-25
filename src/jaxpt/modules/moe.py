@@ -84,7 +84,9 @@ class Experts(nnx.Module):
         x = jax.lax.with_sharding_constraint(x, spec)
         h = jnp.einsum('eti,eih->eth', x, w_c_fc) + b_c_fc
         g = jnp.einsum('eti,eih->eth', x, w_gate) + b_gate
-        o = jnp.einsum('eth,eho->eto', nnx.silu(h * g), w_c_proj) + b_c_proj
+        g = nnx.silu(g)
+        h = g * h
+        o = jnp.einsum('eth,eho->eto', h, w_c_proj) + b_c_proj
         o = jax.lax.with_sharding_constraint(o, spec)
         return o
 
@@ -170,7 +172,7 @@ class MOE(nnx.Module):
         gate_logits = self.router_gate(x) # B, T, n_experts
         if self.add_noise:
             noise = jax.random.normal(self.gate_noise_rngstream(), 
-                                      gate_logits.shape) * (1/self.n_experts)
+                                      gate_logits.shape, dtype=jnp.bfloat16) * (1/self.n_experts)
             gate_logits += noise
         gate_probs = jax.nn.softmax(gate_logits)
 
