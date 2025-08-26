@@ -162,6 +162,7 @@ config = Tiny_MoE_Config(
                      moe_bias=False,
                      mlp_bias=False,
                      attention_bias=False,
+                     z_loss_coeff=1e-5,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      ln_epsilon = 1e-5,
@@ -227,11 +228,11 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**14 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 8 * num_devices
+  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 16 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 1e-2
+  max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
@@ -266,7 +267,7 @@ weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_le
 
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
-    optax.adamw(trconf.max_lr, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
@@ -355,7 +356,7 @@ def train_step(model, optimizer, batch, target):
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, load_balance_loss=True, z_loss=False)
+  m.train(add_noise=True, load_balance_loss=True, z_loss=True)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
