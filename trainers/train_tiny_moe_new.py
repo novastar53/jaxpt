@@ -227,11 +227,11 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**20 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 64 * num_devices
+  num_tokens_per_batch: int = 2**14 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 8 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 6e-4
+  max_lr: float = 1e-2
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
@@ -246,25 +246,7 @@ class TrainerConfig:
 ##############
 
 trconf = TrainerConfig()
-assert(trconf.grad_accumulation_steps == 1)
-'''
-trconf = TrainerConfig(
-  num_tokens_per_batch=2**9,
-  mB=2**4,
-  T=2**5,
-  max_steps=9*48, # 6 epoch(s)
-  max_lr=6e-4,
-  min_lr=6e-5,
-  max_grad_norm=1.0,
-  warmup_steps=10,
-  print_interval=1,
-  eval_interval=50,
-  checkpoint_interval=0,
 
-)
-
-trconf.grad_accumulation_steps =  trconf.num_tokens_per_batch // (trconf.mB * trconf.T * num_devices) # Number of steps over which to average the gradient
-'''
 
 # Set up the optimizer
 def trapezoidal_schedule(step):
@@ -283,8 +265,8 @@ graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    optax.clip_by_global_norm(trconf.max_grad_norm),
-    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    #optax.clip_by_global_norm(trconf.max_grad_norm),
+    optax.adamw(trconf.max_lr, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
@@ -302,7 +284,7 @@ logger.info(f"weight decay param count: {weight_decay_param_count:,}")
 logger.info("Model Config:\n%s", pformat(trconf))
 logger.info(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
 logger.info(f"effective batch size per device: {trconf.grad_accumulation_steps * trconf.mB // num_devices}")
-
+assert(trconf.grad_accumulation_steps == 1)
 
 # ### DataLoader and Validation Setup
 # 
@@ -361,19 +343,19 @@ def moe_loss_fn(model, batch, targets):
     loss = loss.mean() 
     loss += model.config.load_balance_loss_coeff * load_balance_loss
     loss += model.config.z_loss_coeff * z_loss
-    return loss, load_balance_loss, z_loss
+    return loss, (load_balance_loss, z_loss)
 
 
 @nnx.jit
 def train_step(model, optimizer, batch, target):
-    (loss, load_balance_loss, z_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
+    (loss, (load_balance_loss, z_loss)), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
     return loss, load_balance_loss, z_loss
 
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, aux_loss=True)
+  m.train(add_noise=True, load_balance_loss=True, z_loss=False)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
@@ -409,18 +391,18 @@ with mesh:
         logger.info("Evaluation TBD")
       if step > 0 and step % trconf.checkpoint_interval == 0:
         logger.info(f"Saving checkpoint at step {step}")
-        save_checkpoint(m, output_dir, run_dirname, step)
+        #save_checkpoint(m, output_dir, run_dirname, step)
         #save_optimizer_state(optimizer)
   except KeyboardInterrupt:
       logger.info("Received KeyboardInterrupt. Exiting...")
   finally:
-    plt.figure(figsize=(7, 5))
-    plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
-    plt.yticks(ticks=np.arange(0, 12, 0.5))
-    plt.grid()
-    plt.legend()
-    plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
-
-    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-    save_optimizer_state(m, optimizer)
+    #plt.figure(figsize=(7, 5))
+    #plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
+    #plt.yticks(ticks=np.arange(0, 12, 0.5))
+    #plt.grid()
+    #plt.legend()
+    #plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
+#
+#    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
+#    save_optimizer_state(m, optimizer)
     logger.info("Done.")

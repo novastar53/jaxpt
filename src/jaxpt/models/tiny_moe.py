@@ -193,12 +193,12 @@ class Tiny_MoE(nnx.Module):
         total_load_balance_loss = 0
         total_z_loss = 0
         for i in range(0, self.n_layer, 2):
-            if self.load_balance_loss or self.z_loss:
-                output = self.h[i](x, mask)
+            output = self.h[i](x, mask)
+            x = output["y"]
+            if self.load_balance_loss:
                 total_load_balance_loss += output["load_balance_loss"]
+            if self.z_loss:
                 total_z_loss += output["z_loss"]
-            else:
-                x = self.h[i](x, mask)
             x = self.h[i+1](x, mask)
         x = self.rms_n_f(x)
         logits = self.wte.attend(x)
