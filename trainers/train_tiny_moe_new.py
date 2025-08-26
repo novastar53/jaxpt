@@ -356,7 +356,7 @@ def train_step(model, optimizer, batch, target):
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, load_balance_loss=True, z_loss=True)
+  m.train(add_noise=True, load_balance_loss=True, z_loss=False)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
