@@ -124,7 +124,7 @@ from jaxpt.checkpointers import save_checkpoint, load_checkpoint, load_checkpoin
 from jaxpt.utils import generate_readable_code
 
 if platform == "cuda":
-  output_dir = Path("/workspace/alpha_training_runs") # Lambda Labs setup
+  output_dir = Path("/home/ubuntu/train-gpt2-data-2/alpha_training_runs") # Lambda Labs setup
 else:
   output_dir = Path().absolute().parent  / "alpha_training_runs" # Local setup
 logger.info(f"Output dir: {output_dir}")
@@ -228,8 +228,8 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 32 * num_devices
+  num_tokens_per_batch: int = 2**20 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 64 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
@@ -356,7 +356,7 @@ def train_step(model, optimizer, batch, target):
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, load_balance_loss=True, z_loss=True)
+  m.train(add_noise=False, load_balance_loss=True, z_loss=True)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
@@ -392,18 +392,16 @@ with mesh:
         logger.info("Evaluation TBD")
       if step > 0 and step % trconf.checkpoint_interval == 0:
         logger.info(f"Saving checkpoint at step {step}")
-        #save_checkpoint(m, output_dir, run_dirname, step)
-        #save_optimizer_state(optimizer)
+        save_checkpoint(m, output_dir, run_dirname, step)
   except KeyboardInterrupt:
       logger.info("Received KeyboardInterrupt. Exiting...")
   finally:
-    #plt.figure(figsize=(7, 5))
-    #plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
-    #plt.yticks(ticks=np.arange(0, 12, 0.5))
-    #plt.grid()
-    #plt.legend()
-    #plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
-#
-#    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-#    save_optimizer_state(m, optimizer)
+    plt.figure(figsize=(7, 5))
+    plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
+    plt.yticks(ticks=np.arange(0, 12, 0.5))
+    plt.grid()
+    plt.legend()
+    plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
+
+    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
     logger.info("Done.")
