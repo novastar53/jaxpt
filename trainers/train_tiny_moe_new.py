@@ -162,7 +162,7 @@ config = Tiny_MoE_Config(
                      moe_bias=False,
                      mlp_bias=False,
                      attention_bias=False,
-                     z_loss_coeff=1e-5,
+                     z_loss_coeff=1e-4,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      ln_epsilon = 1e-5,
@@ -228,8 +228,8 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 16 * num_devices
+  num_tokens_per_batch: int = 2**19 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 32 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
@@ -356,7 +356,7 @@ def train_step(model, optimizer, batch, target):
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, load_balance_loss=True, z_loss=False)
+  m.train(add_noise=True, load_balance_loss=True, z_loss=True)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
