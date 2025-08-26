@@ -34,7 +34,8 @@ class Tiny_MoE_Config(Config):
     top_k: int = 2  # number of top experts to use
     load_factor: float = 1.1 # load factor for expert buffers
     expert_weight_priority: bool = True # sort expert buffer assignments by expert weight 
-    aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
+    load_balance_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
+    z_loss_coeff: float = 1e-3 # moe z loss coefficient
     n_mlp_hidden: int = 2304  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
@@ -129,17 +130,15 @@ class MOE_Block(nnx.Module):
         )
         self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
         self.moe = MOE(config, rngs)
-        self.aux_loss = False
+        self.load_balance_loss = False
+        self.z_loss = False
 
     def __call__(self, x, mask=None):
         x = x + self.attn(self.rms_n_1(x), mask=mask)
-        if self.aux_loss is True:
-            moe_out, moe_aux_loss = self.moe(self.rms_n_2(x))
-            x = x + moe_out
-            return x, moe_aux_loss
-        else:
-            x = x + self.moe(self.rms_n_2(x))
-            return x
+        output = self.moe(self.rms_n_2(x))
+        x = x + output["y"]
+        output["y"] = x
+        return output
 
 
 class Tiny_MoE(nnx.Module):
@@ -184,24 +183,27 @@ class Tiny_MoE(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.aux_loss = False
         self.n_layer = config.n_layer
+        self.load_balance_loss = False
+        self.z_loss = False
 
 
     def __call__(self, idx, mask=None):
         x = self.wte(idx)
-        total_aux_loss = 0
+        total_load_balance_loss = 0
+        total_z_loss = 0
         for i in range(0, self.n_layer, 2):
-            if self.aux_loss is True:
-                x, aux_loss = self.h[i](x, mask)
-                total_aux_loss += aux_loss
+            if self.load_balance_loss or self.z_loss:
+                output = self.h[i](x, mask)
+                total_load_balance_loss += output["load_balance_loss"]
+                total_z_loss += output["z_loss"]
             else:
                 x = self.h[i](x, mask)
             x = self.h[i+1](x, mask)
         x = self.rms_n_f(x)
         logits = self.wte.attend(x)
-        if self.aux_loss is True:
-            return logits, total_aux_loss
+        if self.load_balance_loss or self.z_loss:
+            return logits, total_load_balance_loss, total_z_loss
         return logits
     
             

@@ -128,7 +128,8 @@ class MOE(nnx.Module):
         self.load_factor = config.load_factor
         self.expert_weight_priority = config.expert_weight_priority
         self.add_noise = False
-        self.aux_loss = False
+        self.load_balance_loss = False
+        self.z_loss = False
         #self.gate_noise_rngstream = rngs['gate_noise'].fork()
         self.gate_noise_rngstream = rngs.gate_noise # TODO: Temporary fix for backward compatibility with Jax version 0.5.2
 
@@ -183,8 +184,12 @@ class MOE(nnx.Module):
         Expert routing based on the vmoe implementation: 
         https://github.com/google-research/vmoe/blob/main/vmoe/nn/routing.py
         '''
+        output = {}
         B, T, C = x.shape
         gate_logits = self.router_gate(x) # B, T, n_experts
+        if self.z_loss:
+            z_loss = jnp.sum(jnp.square(jnp.log(jnp.sum(jnp.exp(gate_logits), axis=-1)))) / (B * T) 
+            output["z_loss"] = z_loss
         if self.add_noise:
             noise = jax.random.normal(self.gate_noise_rngstream(), 
                                       gate_logits.shape, dtype=self.config.dtype) * (1/self.n_experts)
@@ -224,18 +229,18 @@ class MOE(nnx.Module):
 
         expert_outputs = jax.lax.with_sharding_constraint(expert_outputs, spec)
 
-        y_pred = jax.vmap(
+        y = jax.vmap(
             lambda x, i, p, prob: self._collect_outputs(x, i, p, prob)
             )(expert_outputs, expert_indices, expert_positions, top_k_probs)
 
-        y_pred = jax.lax.with_sharding_constraint(y_pred, spec)
+        y = jax.lax.with_sharding_constraint(y, spec)
 
-        if self.aux_loss is True:
+        if self.load_balance_loss is True:
             frac_tokens = jnp.bincount(expert_indices.flatten(), length=self.n_experts) / (2 * B * T) # distribution of tokens across experts
             frac_router_probs = jnp.sum(gate_probs, axis=(0, 1)) / (B * T) # distribution of gate probabilities across experts
-            aux_loss = jnp.sum(frac_tokens * frac_router_probs) * self.n_experts
+            load_balance_loss = jnp.sum(frac_tokens * frac_router_probs) * self.n_experts
+            output["load_balance_loss"] = load_balance_loss
 
-            return y_pred, aux_loss
-        
-        return y_pred
+        output["y"] = y
+        return output
 

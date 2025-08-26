@@ -346,7 +346,7 @@ log_dir.mkdir(parents=True, exist_ok=True)
 logger.info(f"Log directory: {log_dir}")
 
 train_losses = []
-append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "aux_loss", "time", "tokens_processed", "tokens_per_sec"])
+append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "load_balance_loss", "z_loss", "time", "tokens_processed", "tokens_per_sec"])
 logger.info(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
@@ -356,17 +356,19 @@ import time
 import matplotlib.pyplot as plt
 
 def moe_loss_fn(model, batch, targets):
-    logits, aux_loss = model(batch)
+    logits, load_balance_loss, z_loss = model(batch)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    loss = loss.mean() + model.config.aux_loss_coeff * aux_loss
-    return loss, aux_loss
+    loss = loss.mean() 
+    loss += model.config.load_balance_loss_coeff * load_balance_loss
+    loss += model.config.z_loss_coeff * z_loss
+    return loss, load_balance_loss, z_loss
 
 
 @nnx.jit
 def train_step(model, optimizer, batch, target):
-    (loss, aux_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
+    (loss, load_balance_loss, z_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
-    return loss, aux_loss
+    return loss, load_balance_loss, z_loss
 
 
 with mesh:
@@ -378,7 +380,7 @@ with mesh:
       batch, target = train_dl()
       batch = jax.device_put(batch.squeeze(), data_sharding)
       target = jax.device_put(target.squeeze(), data_sharding)
-      avg_loss, aux_loss = train_step(m, optimizer, batch, target)
+      avg_loss, load_balance_loss, z_loss = train_step(m, optimizer, batch, target)
       if step % trconf.print_interval == 0:
         if not start:
           start = time.time()
@@ -394,10 +396,11 @@ with mesh:
         avg_loss = avg_loss.item()
 
         train_losses.append((step, avg_loss))
-        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr.item(), avg_loss, aux_loss.item(), iter_time*1000, tokens_processed, tokens_per_sec])
+        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr.item(), avg_loss, load_balance_loss.item(), z_loss.item(), iter_time*1000, tokens_processed, tokens_per_sec])
         logger.info(f"{step} | lr: {lr:0.4f} | "
                     f"loss: {avg_loss:0.4f} | "
-                    f"aux_loss: {aux_loss.item():0.4f} | "
+                    f"load_balance_loss: {load_balance_loss.item():0.4f} | "
+                    f"z_loss: {z_loss.item():0.4f} | "
                     f"time: {iter_time*1000:0.2f}ms | "
                     f"tokens processed: {tokens_processed:,} | "
                     f"tok/sec: {tokens_per_sec:,.2f}")
