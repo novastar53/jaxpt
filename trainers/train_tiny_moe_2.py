@@ -12,7 +12,7 @@ from typing import Literal
 
 import os
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 
 import jax
@@ -161,15 +161,15 @@ rngs = nnx.Rngs(0)
 config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
-                     vocab_size=50304,
-                     n_layer=30,
+                     vocab_size=49152,
+                     n_layer=2,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
                      n_embed=672,
                      n_mlp_hidden=2048,
                      expert_weight_priority=False,
-                     load_factor=1.5,
+                     load_factor=1.25,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
@@ -231,9 +231,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
-  mB: int = 32 * num_devices
-  T: int = config.block_size
+  num_tokens_per_batch: int = 2**11 # 2**20, 1.0 million
+  mB: int = 2 * num_devices
+  T: int = 128 #config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -263,7 +263,7 @@ graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    optax.clip_by_global_norm(trconf.max_grad_norm),
+    #optax.clip_by_global_norm(trconf.max_grad_norm),
     optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
     #optax.adam(trapezoidal_schedule)
 )
@@ -296,14 +296,14 @@ import os
 
 from jaxpt.dataloaders import DataLoader, BlendedCloudDataLoader
 
-#train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
-#                      batch_size=trconf.mB,
-#                      block_size=trconf.T,
-#                      device_rank=1,
-#                      label="train")
-#
+train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
+                      batch_size=trconf.mB,
+                      block_size=trconf.T,
+                      device_rank=1,
+                      label="train")
 
 
+'''
 train_dl = BlendedCloudDataLoader(
     device_rank=1,
     block_size=trconf.T,
@@ -315,6 +315,7 @@ train_dl = BlendedCloudDataLoader(
     proportions=[85, 1, 12],
     label="train"
 )
+'''
 # In[10]:
 
 
@@ -326,7 +327,7 @@ log_dir.mkdir(parents=True, exist_ok=True)
 print(f"Log directory: {log_dir}")
 
 train_losses = []
-append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "time", "tokens_processed", "tokens_per_sec"])
+append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "load_balance_loss", "z_loss", "time", "tokens_processed", "tokens_per_sec"])
 print(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
@@ -338,31 +339,31 @@ import time
 import matplotlib.pyplot as plt
 
 def moe_loss_fn(model, batch, targets):
-    logits, aux_loss = model(batch)
+    logits, load_balance_loss, z_loss = model(batch)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    loss = loss.mean() + model.config.aux_loss_coeff * aux_loss
-    return loss, aux_loss
+    loss = loss.mean() 
+    loss += model.config.load_balance_loss_coeff * load_balance_loss 
+    loss += model.config.z_loss_coeff * z_loss
+    return loss, (load_balance_loss, z_loss)
 
 
-@nnx.jit
+#@nnx.jit
 def train_step(model, optimizer, batch, target):
-    batch = batch.squeeze()
-    target = target.squeeze()
-    (loss, aux_loss), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
+    (loss, (load_balance_loss, z_loss)), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
-    return loss, aux_loss
+    return loss, load_balance_loss, z_loss
 
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, aux_loss=True)
+  m.train(add_noise=False, load_balance_loss=True, z_loss=True)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
       batch, target = train_dl()
       batch = jax.device_put(batch.squeeze(), data_sharding)
       target = jax.device_put(target.squeeze(), data_sharding)
-      avg_loss, aux_loss = train_step(m, optimizer, batch, target)
+      avg_loss, load_balance_loss, z_loss = train_step(m, optimizer, batch, target)
       iter_time = time.time() - start
       if step % trconf.print_interval == 0:
         if not start:
@@ -380,10 +381,11 @@ with mesh:
         avg_loss = avg_loss.item()
 
         train_losses.append((step, avg_loss))
-        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, iter_time*1000, tokens_processed, tokens_per_sec])
+        append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, load_balance_loss, z_loss, iter_time*1000, tokens_processed, tokens_per_sec])
         print(f"{step} | lr: {lr:0.4f} | "
               f"loss: {avg_loss:0.4f} | "
-              f"aux_loss: {aux_loss:0.4f} | "
+              f"load balance loss: {load_balance_loss:0.4f} | "
+              f"z-loss: {z_loss:0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
               f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
@@ -392,18 +394,18 @@ with mesh:
         print("Evaluation TBD")
       if step > 0 and step % trconf.checkpoint_interval == 0:
         print(f"Saving checkpoint at step {step}")
-        #save_checkpoint(m, output_dir, run_dirname, step)
+        save_checkpoint(m, output_dir, run_dirname, step)
         #save_optimizer_state(optimizer)
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
   finally:
-    #plt.figure(figsize=(7, 5))
-    #plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
-    #plt.yticks(ticks=np.arange(0, 12, 0.5))
-    #plt.grid()
-    #plt.legend()
-    #plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
+    plt.figure(figsize=(7, 5))
+    plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
+    plt.yticks(ticks=np.arange(0, 12, 0.5))
+    plt.grid()
+    plt.legend()
+    plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
 
-    #save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
+    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
     #save_optimizer_state(optimizer)
     print("Done.")

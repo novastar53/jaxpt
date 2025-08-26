@@ -22,17 +22,18 @@ class Tiny_MoE_2_Config(Config):
     param_dtype: jnp.dtype = jnp.float32 # parameter dtype
     block_size: int = 2048  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
-    n_layer: int = 32  # number of attention blocks
+    n_layer: int = 30  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_kv_head: int = 4  # number of key-value heads
-    n_embed: int = 576  # number token embedding dimensionsa
+    n_embed: int = 672  # number token embedding dimensionsa
     n_experts: int = 8  # number of experts
     mesh: jax.sharding.Mesh | None = None  # device mesh
     top_k: int = 2  # number of top experts to use
-    load_factor: float = 1.1 # load factor for expert buffers
-    expert_weight_priority: bool = True # sort expert buffer assignments by expert weight 
-    aux_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
-    n_mlp_hidden: int = 2304  # number of hidden dimensions
+    load_factor: float = 1.25 # load factor for expert buffers
+    expert_weight_priority: bool = False # sort expert buffer assignments by expert weight 
+    load_balance_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
+    z_loss_coeff: float = 1e-4 # moe z loss coefficient
+    n_mlp_hidden: int = 2048  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     moe_bias: bool = False # use bias in moe layers
@@ -97,14 +98,10 @@ class Block(nnx.Module):
 
     def __call__(self, x, mask=None):
         x = self.attn(self.rms_n_1(x), mask=mask) + x
-        if self.aux_loss is True:
-            moe_out, moe_aux_loss = self.moe(self.rms_n_2(x))
-            x = moe_out + x
-            return x, moe_aux_loss
-        else:
-            moe_out = self.moe(self.rms_n_2(x))
-            x = moe_out + x
-            return x
+        output = self.moe(self.rms_n_2(x))
+        x = x + output["y"] 
+        output["y"] = x
+        return output
 
 
 class Tiny_MoE_2(nnx.Module):
@@ -144,23 +141,25 @@ class Tiny_MoE_2(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.aux_loss = False
         self.n_layer = config.n_layer
+        self.load_balance_loss = False
+        self.z_loss = False
+
 
     def __call__(self, idx, mask=None):
         x = self.wte(idx)
-        total_aux_loss = 0
+        total_load_balance_loss = 0
+        total_z_loss = 0
         for i in range(self.n_layer):
-            if self.aux_loss is True:
-                x, aux_loss = self.h[i](x, mask)
-                total_aux_loss += aux_loss
-            else:
-                x = self.h[i](x, mask)
+            output = self.h[i](x, mask)
+            x = output["y"]
+            if self.load_balance_loss:
+                total_load_balance_loss += output["load_balance_loss"]
+            if self.z_loss:
+                total_z_loss += output["z_loss"]
         x = self.rms_n_f(x)
         logits = self.wte.attend(x)
-        if self.aux_loss is True:
-            return logits, total_aux_loss
-        return logits
+        return logits, total_load_balance_loss, total_z_loss
     
             
     def save_checkpoint(self, fpath: str):
