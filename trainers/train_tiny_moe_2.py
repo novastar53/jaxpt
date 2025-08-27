@@ -12,7 +12,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 
 import jax
@@ -124,7 +124,7 @@ from jaxpt.checkpointers import save_checkpoint, load_checkpoint, load_checkpoin
 from jaxpt.utils import generate_readable_code
 
 if platform == "cuda":
-  output_dir = Path("/workspace/alpha_training_runs") # Lambda Labs setup
+  output_dir = Path("/home/ubuntu/train-gpt2-data-2/alpha_training_runs") # Lambda Labs setup
 else:
   output_dir = Path().absolute().parent  / "alpha_training_runs" # Local setup
 print(f"Output dir: {output_dir}")
@@ -162,14 +162,20 @@ config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=2,
+                     n_layer=30,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
                      n_embed=672,
                      n_mlp_hidden=2048,
+                     moe_bias=False,
+                     mlp_bias=False,
+                     attention_bias=False,
+                     load_balance_loss_coeff=1e-2,
+                     z_loss_coeff=1e-4,
                      expert_weight_priority=False,
                      load_factor=1.25,
+                     ln_epsilon = 1e-5,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
 pprint(config)
 
@@ -231,9 +237,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**11 # 2**20, 1.0 million
-  mB: int = 2 * num_devices
-  T: int = 128 #config.block_size
+  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
+  mB: int = 32 * num_devices
+  T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -347,7 +353,7 @@ def moe_loss_fn(model, batch, targets):
     return loss, (load_balance_loss, z_loss)
 
 
-#@nnx.jit
+@nnx.jit
 def train_step(model, optimizer, batch, target):
     (loss, (load_balance_loss, z_loss)), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
@@ -379,6 +385,7 @@ with mesh:
         tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
         lr = trapezoidal_schedule(step)
         avg_loss = avg_loss.item()
+        print(z_loss, type(z_loss))
 
         train_losses.append((step, avg_loss))
         append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, load_balance_loss, z_loss, iter_time*1000, tokens_processed, tokens_per_sec])
