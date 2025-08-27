@@ -156,7 +156,7 @@ config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=2,
+                     n_layer=30,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
@@ -199,9 +199,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**11 # 2**20, 1.0 million
-  mB: int = 16 * num_devices
-  T: int = 128 #config.block_size
+  num_tokens_per_batch: int = 2**19 # 2**20, 1.0 million
+  mB: int = 32 * num_devices
+  T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
