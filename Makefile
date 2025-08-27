@@ -3,10 +3,12 @@
 # Default Python version
 PYTHON_VERSION ?= 3.12.8
 
+SUDO := $(shell if [ "$$(id -u)" -ne 0 ]; then echo "sudo"; fi)
+
 # Detect platform
 UNAME_M := $(shell uname -m)
 UNAME_S := $(shell uname -s)
-TPUS := $(shell sudo lshw | grep tpu | wc -l)
+TPUS := $(shell $(SUDO) lshw | grep tpu | wc -l)
 
 print-tpus:
 	@echo "$(TPUS)"
@@ -109,9 +111,9 @@ lab:
 	jupyter server list 
 
 gcloud:
-	curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-	echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-	sudo apt-get update && sudo apt-get install google-cloud-cli
+	curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | $(SUDO) gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+	echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | $(SUDO) tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+	$(SUDO) apt-get update && $(SUDO) apt-get install google-cloud-cli
 
 # Run unit tests
 unit-test:
