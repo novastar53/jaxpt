@@ -156,7 +156,7 @@ config = Tiny_MoE_2_Config(
                      name="Tiny_MoE",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=30,
+                     n_layer=2,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
@@ -199,9 +199,9 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
+  num_tokens_per_batch: int = 2**11 # 2**20, 1.0 million
   mB: int = 32 * num_devices
-  T: int = config.block_size
+  T: int = 128 #config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 1e-3
   min_lr: float = max_lr * 0.1
@@ -218,14 +218,30 @@ class TrainerConfig:
 trconf = TrainerConfig()
 
 # Set up the optimizer
-def trapezoidal_schedule(step):
+#def trapezoidal_schedule(step):
+#
+#    warmup_lr = trconf.max_lr * (step + 1) / trconf.warmup_steps
+#    cooldown_lr = trconf.max_lr * (trconf.max_steps - step) / (trconf.max_steps - 0.8 * trconf.max_steps)
+##
+#    return jnp.where(step < trconf.warmup_steps,
+#                     warmup_lr,
+#                     jnp.where(step < 0.8 * trconf.max_steps, trconf.max_lr, cooldown_lr))
 
+def inverse_sqrt_schedule(step):
     warmup_lr = trconf.max_lr * (step + 1) / trconf.warmup_steps
-    cooldown_lr = trconf.max_lr * (trconf.max_steps - step) / (trconf.max_steps - 0.8 * trconf.max_steps)
+    regular_lr = trconf.max_lr * jnp.sqrt(trconf.warmup_steps) / jnp.sqrt(step + 1)
+    return jnp.where(step < trconf.warmup_steps, warmup_lr, regular_lr)
 
-    return jnp.where(step < trconf.warmup_steps,
-                     warmup_lr,
-                     jnp.where(step < 0.8 * trconf.max_steps, trconf.max_lr, cooldown_lr))
+
+steps = range(0, trconf.max_steps, 1000)
+total_schedule = [ inverse_sqrt_schedule(step) for step in steps ]
+import matplotlib.pyplot as plt
+plt.figure(figsize=(3,2))
+plt.plot(steps, total_schedule)
+plt.title("LR Schedule")
+plt.show()
+
+
 
 from jaxpt.checkpointers import load_optimizer_state, save_optimizer_state
 
@@ -238,7 +254,7 @@ weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_le
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
     #optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
-    optax.adam(trapezoidal_schedule, b1=0.9, b2=0.95)
+    optax.adam(inverse_sqrt_schedule, b1=0.9, b2=0.95)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 #optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_oculina_idic", 12)
@@ -349,7 +365,7 @@ with mesh:
           tokens_per_sec = trconf.mB * trconf.T * trconf.grad_accumulation_steps / iter_time
 
         tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
-        lr = trapezoidal_schedule(step)
+        lr = inverse_sqrt_schedule(step)
         avg_loss = avg_loss.item()
         load_balance_loss = load_balance_loss.item()
         z_loss = z_loss.item()
