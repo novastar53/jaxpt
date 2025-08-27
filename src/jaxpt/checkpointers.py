@@ -1,5 +1,7 @@
 import os
 
+import flax.nnx as nnx
+import orbax.checkpoint as ocp
 from google.cloud import storage
 
 
@@ -49,3 +51,26 @@ def load_checkpoint_from_gcloud(
             blob.download_to_filename(dst_path)
         m = model.from_checkpoint(checkpoint_path, rngs, config)
         return m
+
+
+def save_optimizer_state(output_dir, run_dirname, config, optimizer):
+  state_dirpath = (
+    output_dir / config.name / "optimizer_checkpoints" / run_dirname
+  )
+  state_dirpath.mkdir(parents=True, exist_ok=True)
+  _, state = nnx.split(optimizer)
+  cp = ocp.StandardCheckpointer()
+  print(f"Saving optimizer state to {state_dirpath}/step-{optimizer.step.value.item()}")
+  cp.save(state_dirpath / f"step-{optimizer.step.value.item()}", state)
+  cp.wait_until_finished()
+
+
+def load_optimizer_state(config, optimizer, output_dir, run_dirname, step):
+  cp = ocp.StandardCheckpointer()
+  graphdef, state = nnx.split(optimizer)
+  path = output_dir / config.name / "optimizer_checkpoints" / run_dirname / f"step-{step}"
+  state = cp.restore(path, target=state)
+  print(f"loading_optimizer_state from {path}")
+  optimizer = nnx.merge(graphdef, state)
+  return optimizer
+

@@ -136,15 +136,9 @@ run_dirname = f"run_{timestamp}_{random_code}"
 print(f"Run: {run_dirname}")
 
 
-
-# In[5]:
-
-
-from flax import nnx
-
-
 # In[6]:
 
+from flax import nnx
 from pprint import pprint
 
 from jaxpt.models import Tiny_MoE_2_Config, Tiny_MoE_2
@@ -191,38 +185,6 @@ with mesh:
     print(f"Replicated Parameter Count: {total_params - moe_params:,}")
 
   
-# ### Configure Training Run
-
-# In[7]:
-
-
-import orbax.checkpoint as ocp
-
-# Set up save and load optimizer
-
-def save_optimizer_state(optimizer):
-  state_dirpath = (
-    output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname
-  )
-  state_dirpath.mkdir(parents=True, exist_ok=True)
-  _, state = nnx.split(optimizer)
-  state.model = None
-  cp = ocp.StandardCheckpointer()
-  print(f"Saving optimizer state to {state_dirpath}/step-{optimizer.step.value.item()}")
-  cp.save(state_dirpath / f"step-{optimizer.step.value.item()}", state)
-  cp.wait_until_finished()
-
-def load_optimizer_state(model, optimizer, run_dirname, step):
-  cp = ocp.StandardCheckpointer()
-  graphdef, state = nnx.split(optimizer)
-  state_model = state.model
-  state.model = None
-  state = cp.restore(output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname / f"step-{step}", target=state)
-  state.model = state_model
-  optimizer = nnx.merge(graphdef, state)
-  return optimizer
-
-
 # In[8]:
 
 
@@ -246,7 +208,10 @@ class TrainerConfig:
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
   print_interval: int = 100
+  eval: bool = False
   eval_interval: int = 5000
+  save_model_checkpoint: bool = False
+  save_optimizer_checkpoint: bool = False
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
 
@@ -262,6 +227,8 @@ def trapezoidal_schedule(step):
                      warmup_lr,
                      jnp.where(step < 0.8 * trconf.max_steps, trconf.max_lr, cooldown_lr))
 
+from jaxpt.checkpointers import load_optimizer_state, save_optimizer_state
+
 # Generate a weight decay mask
 # First split the model into params and variables
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
@@ -274,7 +241,7 @@ tx = optax.chain(
     #optax.adam(trapezoidal_schedule)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
-#optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
+#optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_oculina_idic", 12)
 
 
 # count the number of weight decay params
@@ -384,8 +351,8 @@ with mesh:
         tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
         lr = trapezoidal_schedule(step)
         avg_loss = avg_loss.item()
-        print(z_loss, type(z_loss))
-
+        load_balance_loss = load_balance_loss.item()
+        z_loss = z_loss.item()
         train_losses.append((step, avg_loss))
         append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, load_balance_loss, z_loss, iter_time*1000, tokens_processed, tokens_per_sec])
         print(f"{step} | lr: {lr:0.4f} | "
@@ -396,12 +363,14 @@ with mesh:
               f"tokens processed: {tokens_processed:,} | "
               f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
         start = time.time()
-      if step > 0 and step % trconf.eval_interval == 0:
+      if trconf.eval and step > 0 and step % trconf.eval_interval == 0:
         print("Evaluation TBD")
-      if step > 0 and step % trconf.checkpoint_interval == 0:
-        print(f"Saving checkpoint at step {step}")
+      if trconf.save_model_checkpoint and step > 0 and step % trconf.checkpoint_interval == 0:
+        print(f"Saving model checkpoint at step {step}")
         save_checkpoint(m, output_dir, run_dirname, step)
-        #save_optimizer_state(optimizer)
+      if trconf.save_optimizer_checkpoint and step > 0 and step % trconf.checkpoint_interval == 0:
+        print(f"Saving optimizer checkpoint at step {step}")
+        save_optimizer_state(output_dir, run_dirname, config, optimizer)
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
   finally:
@@ -411,7 +380,8 @@ with mesh:
     plt.grid()
     plt.legend()
     plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
-
-    save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-    #save_optimizer_state(optimizer)
+    if trconf.save_model_checkpoint:
+      save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
+    if trconf.save_optimizer_checkpoint:
+      save_optimizer_state(output_dir, run_dirname, config, optimizer)
     print("Done.")
