@@ -166,7 +166,7 @@ config = Tiny_MoE_2_Config(
                      mlp_bias=False,
                      attention_bias=False,
                      load_balance_loss_coeff=1e-2,
-                     z_loss_coeff=1e-4,
+                     z_loss_coeff=1e-3,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      ln_epsilon = 1e-5,
@@ -199,11 +199,11 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**19 # 2**20, 1.0 million
+  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
   mB: int = 32 * num_devices
   T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 6e-4
+  max_lr: float = 1e-3
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
@@ -237,8 +237,8 @@ weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_le
 
 tx = optax.chain(
     #optax.clip_by_global_norm(trconf.max_grad_norm),
-    optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
-    #optax.adam(trapezoidal_schedule)
+    #optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    optax.adam(trapezoidal_schedule, b1=0.9, b2=0.95)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 #optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_oculina_idic", 12)
