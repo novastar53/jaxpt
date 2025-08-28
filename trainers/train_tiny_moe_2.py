@@ -17,6 +17,10 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json
 
 import jax
 
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 platform : Literal["darwin", "colab", "cuda", "tpu"] = "darwin"
 
 devices = jax.devices()
@@ -25,7 +29,7 @@ if any(d.platform == "gpu" for d in devices):
 if any(d.platform == "tpu" for d in devices):
     platform = "tpu"
 
-print(f"Running on {platform}")
+logger.info(f"Running on {platform}")
 
 
 # In[2]:
@@ -36,7 +40,7 @@ import sys
 jaxpt_dir = str(Path().absolute().parent / "src" )
 
 sys.path.append(jaxpt_dir)
-print(f"Jaxpt dir {jaxpt_dir}")
+logger.info(f"Jaxpt dir {jaxpt_dir}")
 
 
 # In[3]:
@@ -54,12 +58,12 @@ import jax.numpy as jnp
 import numpy as np
 
 # Hardware setup
-print("JAX version:", jax.__version__)
-print("Flax version", flax.__version__)
+logger.info(f"JAX version: {jax.__version__}")
+logger.info(f"Flax version: {flax.__version__}")
 
 devices = jax.devices()
 num_devices = len(devices)
-print("Available devices:", num_devices)
+logger.info(f"Available devices: {num_devices}")
 
 requested_device = "gpu"
 
@@ -69,7 +73,7 @@ device = jax.default_backend()
 if device != requested_device:
     warnings.warn(f"not using {requested_device}. Using {device}")
 else:
-    print(f"using {device}")
+    logger.info(f"using {device}")
 
 
 #####################################
@@ -102,7 +106,7 @@ if device == "tpu":
         devices = jax.devices()
         for device in devices:
             if 'TPU' in str(device.device_kind):
-                print(f"Device: {device}, Memory: {device.memory_stats()['bytes_limit']/(1024*1024)},  Used: {device.memory_stats()['bytes_in_use']/(1024*1024)}")
+                logger.info(f"Device: {device}, Memory: {device.memory_stats()['bytes_limit']/(1024*1024)},  Used: {device.memory_stats()['bytes_in_use']/(1024*1024)}")
 
     list_tpu_memory()
 
@@ -127,19 +131,19 @@ if platform == "cuda":
   output_dir = Path("/home/ubuntu/train-gpt2-data-2/alpha_training_runs") # Lambda Labs setup
 else:
   output_dir = Path().absolute().parent  / "alpha_training_runs" # Local setup
-print(f"Output dir: {output_dir}")
+logger.info(f"Output dir: {output_dir}")
 
 timestamp = datetime.now().strftime("%Y%m%d")
 random_code = generate_readable_code()
 
 run_dirname = f"run_{timestamp}_{random_code}"
-print(f"Run: {run_dirname}")
+logger.info(f"Run: {run_dirname}")
 
 
 # In[6]:
 
 from flax import nnx
-from pprint import pprint
+import pprint
 
 from jaxpt.models import Tiny_MoE_2_Config, Tiny_MoE_2
 from jaxpt.utils import count_params, create_sharded_model
@@ -153,10 +157,10 @@ rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
 rngs = nnx.Rngs(0)
 
 config = Tiny_MoE_2_Config(
-                     name="Tiny_MoE",
+                     name="Tiny_MoE_2",
                      dtype=jnp.bfloat16, \
                      vocab_size=49152,
-                     n_layer=2,
+                     n_layer=30,
                      block_size=2048,
                      n_head=12,
                      n_kv_head=4,
@@ -166,12 +170,12 @@ config = Tiny_MoE_2_Config(
                      mlp_bias=False,
                      attention_bias=False,
                      load_balance_loss_coeff=1e-2,
-                     z_loss_coeff=1e-3,
+                     z_loss_coeff=5e-4,
                      expert_weight_priority=False,
                      load_factor=1.25,
                      ln_epsilon = 1e-5,
                      sdpa_implementation="cudnn" if device=="gpu" else "xla")
-pprint(config)
+logger.info("\n" + pprint.pformat(config))
 
 with mesh:
     m = create_sharded_model(Tiny_MoE_2, config, rngs)
@@ -180,9 +184,9 @@ with mesh:
     total_params = count_params(m)
     moe_params = count_params(m, "moe")
 
-    print(f"Parameter Count: {total_params:,}")
-    print(f"MOE Parameter Count: {moe_params:,}")
-    print(f"Replicated Parameter Count: {total_params - moe_params:,}")
+    logger.info(f"Parameter Count: {total_params:,}")
+    logger.info(f"MOE Parameter Count: {moe_params:,}")
+    logger.info(f"Replicated Parameter Count: {total_params - moe_params:,}")
 
   
 # In[8]:
@@ -199,19 +203,18 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**11 # 2**20, 1.0 million
+  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
   mB: int = 32 * num_devices
-  T: int = 128 #config.block_size
+  T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 1e-3
-  min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
   print_interval: int = 100
   eval: bool = False
   eval_interval: int = 5000
-  save_model_checkpoint: bool = False
-  save_optimizer_checkpoint: bool = False
+  save_model_checkpoint: bool = True
+  save_optimizer_checkpoint: bool = True
   checkpoint_interval: int = 10000
   grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
 
@@ -233,15 +236,12 @@ def inverse_sqrt_schedule(step):
     return jnp.where(step < trconf.warmup_steps, warmup_lr, regular_lr)
 
 
-steps = range(0, trconf.max_steps, 1000)
-total_schedule = [ inverse_sqrt_schedule(step) for step in steps ]
-import matplotlib.pyplot as plt
-plt.figure(figsize=(3,2))
-plt.plot(steps, total_schedule)
-plt.title("LR Schedule")
-plt.show()
-
-
+#steps = range(0, trconf.max_steps, 1000)
+#total_schedule = [ inverse_sqrt_schedule(step) for step in steps ]
+#import matplotlib.pyplot as plt
+#plt.figure(figsize=(3,2))
+#plt.plot(steps, total_schedule)
+#plt.title("LR Schedule")
 
 from jaxpt.checkpointers import load_optimizer_state, save_optimizer_state
 
@@ -252,9 +252,10 @@ graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    #optax.clip_by_global_norm(trconf.max_grad_norm),
-    #optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
-    optax.adam(inverse_sqrt_schedule, b1=0.9, b2=0.95)
+    optax.clip_by_global_norm(trconf.max_grad_norm),
+    #optax.adam(inverse_sqrt_schedule, b1=0.9, b2=0.95)
+    optax.adamw(inverse_sqrt_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
+    #optax.adafactor(inverse_sqrt_schedule)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 #optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_oculina_idic", 12)
@@ -268,10 +269,10 @@ def f(x, y):
 
 weight_decay_params = jax.tree_util.tree_map(f, weight_decay_mask, params)
 weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_decay_params, 0)
-print(f"weight decay param count: {weight_decay_param_count:,}")
-pprint(trconf)
-print(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
-print(f"effective batch size per device: ", trconf.grad_accumulation_steps * trconf.mB // num_devices)
+logger.info(f"weight decay param count: {weight_decay_param_count:,}")
+logger.info("\n" + pprint.pformat(trconf))
+logger.info(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
+logger.info(f"effective batch size per device: {trconf.grad_accumulation_steps * trconf.mB // num_devices}")
 
 
 # ### DataLoader and Validation Setup
@@ -312,11 +313,11 @@ from jaxpt.utils import append_to_csv
 # Create log dir
 log_dir = output_dir / m.config.name / "logs"
 log_dir.mkdir(parents=True, exist_ok=True)
-print(f"Log directory: {log_dir}")
+logger.info(f"Log directory: {log_dir}")
 
 train_losses = []
 append_to_csv(log_dir / f"{run_dirname}_train.csv", ["step", "lr", "loss", "load_balance_loss", "z_loss", "time", "tokens_processed", "tokens_per_sec"])
-print(f"Starting from step: {optimizer.step.value.item()}")
+logger.info(f"Starting from step: {optimizer.step.value.item()}")
 start = False
 
 
@@ -329,17 +330,16 @@ import matplotlib.pyplot as plt
 def moe_loss_fn(model, batch, targets):
     logits, load_balance_loss, z_loss = model(batch)
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    loss = loss.mean() 
-    loss += model.config.load_balance_loss_coeff * load_balance_loss 
-    loss += model.config.z_loss_coeff * z_loss
-    return loss, (load_balance_loss, z_loss)
+    logit_loss = loss.mean() 
+    loss = logit_loss + model.config.load_balance_loss_coeff * load_balance_loss + model.config.z_loss_coeff * z_loss
+    return loss, (logit_loss, load_balance_loss, z_loss)
 
 
 @nnx.jit
 def train_step(model, optimizer, batch, target):
-    (loss, (load_balance_loss, z_loss)), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
+    (loss, (logits_loss, load_balance_loss, z_loss)), grads = nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
     optimizer.update(model, grads)
-    return loss, load_balance_loss, z_loss
+    return loss, logits_loss, load_balance_loss, z_loss
 
 
 with mesh:
@@ -351,7 +351,7 @@ with mesh:
       batch, target = train_dl()
       batch = jax.device_put(batch.squeeze(), data_sharding)
       target = jax.device_put(target.squeeze(), data_sharding)
-      avg_loss, load_balance_loss, z_loss = train_step(m, optimizer, batch, target)
+      avg_loss, logits_loss, load_balance_loss, z_loss = train_step(m, optimizer, batch, target)
       iter_time = time.time() - start
       if step % trconf.print_interval == 0:
         if not start:
@@ -367,28 +367,30 @@ with mesh:
         tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
         lr = inverse_sqrt_schedule(step)
         avg_loss = avg_loss.item()
+        logits_loss = logits_loss.item()
         load_balance_loss = load_balance_loss.item()
         z_loss = z_loss.item()
         train_losses.append((step, avg_loss))
         append_to_csv(log_dir / f"{run_dirname}_train.csv", [step, lr, avg_loss, load_balance_loss, z_loss, iter_time*1000, tokens_processed, tokens_per_sec])
-        print(f"{step} | lr: {lr:0.4f} | "
+        logger.info(f"{step} | lr: {lr:0.4f} | "
               f"loss: {avg_loss:0.4f} | "
+              f"logits loss: {logits_loss:0.4f} | "
               f"load balance loss: {load_balance_loss:0.4f} | "
               f"z-loss: {z_loss:0.4f} | "
               f"time: {iter_time*1000:0.2f}ms | "
               f"tokens processed: {tokens_processed:,} | "
-              f"tok/sec: {tokens_per_sec:,.2f}", end="\n")
+              f"tok/sec: {tokens_per_sec:,.2f}")
         start = time.time()
       if trconf.eval and step > 0 and step % trconf.eval_interval == 0:
-        print("Evaluation TBD")
+        logger.info("Evaluation TBD")
       if trconf.save_model_checkpoint and step > 0 and step % trconf.checkpoint_interval == 0:
-        print(f"Saving model checkpoint at step {step}")
+        logger.info(f"Saving model checkpoint at step {step}")
         save_checkpoint(m, output_dir, run_dirname, step)
       if trconf.save_optimizer_checkpoint and step > 0 and step % trconf.checkpoint_interval == 0:
-        print(f"Saving optimizer checkpoint at step {step}")
+        logger.info(f"Saving optimizer checkpoint at step {step}")
         save_optimizer_state(output_dir, run_dirname, config, optimizer)
   except KeyboardInterrupt:
-      print("Received KeyboardInterrupt. Exiting...")
+      logger.info("Received KeyboardInterrupt. Exiting...")
   finally:
     plt.figure(figsize=(7, 5))
     plt.plot([x[0] for x in train_losses], [x[1] for x in train_losses], label="train loss")
@@ -400,4 +402,4 @@ with mesh:
       save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
     if trconf.save_optimizer_checkpoint:
       save_optimizer_state(output_dir, run_dirname, config, optimizer)
-    print("Done.")
+    logger.info("Done.")
