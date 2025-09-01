@@ -179,6 +179,7 @@ logger.info("\n" + pprint.pformat(config))
 
 with mesh:
     m = create_sharded_model(Tiny_MoE_2, config, rngs)
+    #m = load_checkpoint(Tiny_MoE_2, output_dir, config, "run_20250827_hart_narendra", 90827, rngs)
 
     graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
     total_params = count_params(m)
@@ -203,7 +204,7 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**20 # 2**20, 1.0 million
+  num_tokens_per_batch: int = 2**19 # 2**20, 1.0 million
   mB: int = 32 * num_devices
   T: int = config.block_size
   max_steps: int = int(num_tokens // num_tokens_per_batch)
@@ -216,9 +217,9 @@ class TrainerConfig:
   save_model_checkpoint: bool = True
   save_optimizer_checkpoint: bool = True
   checkpoint_interval: int = 10000
-  grad_accumulation_steps: int = num_tokens_per_batch // (mB * T) # Number of steps over which to average the gradient
 
 trconf = TrainerConfig()
+assert(trconf.num_tokens_per_batch == trconf.mB * trconf.T)
 
 # Set up the optimizer
 #def trapezoidal_schedule(step):
@@ -258,7 +259,7 @@ tx = optax.chain(
     #optax.adafactor(inverse_sqrt_schedule)
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
-#optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_oculina_idic", 12)
+#optimizer = load_optimizer_state(config, optimizer, output_dir, "run_20250827_hart_narendra", 90827)
 
 
 # count the number of weight decay params
@@ -271,8 +272,8 @@ weight_decay_params = jax.tree_util.tree_map(f, weight_decay_mask, params)
 weight_decay_param_count = jax.tree_util.tree_reduce(lambda x, y: x + y, weight_decay_params, 0)
 logger.info(f"weight decay param count: {weight_decay_param_count:,}")
 logger.info("\n" + pprint.pformat(trconf))
-logger.info(f"effective batch size: {trconf.grad_accumulation_steps * trconf.mB}")
-logger.info(f"effective batch size per device: {trconf.grad_accumulation_steps * trconf.mB // num_devices}")
+logger.info(f"effective batch size: {trconf.mB}")
+logger.info(f"effective batch size per device: {trconf.mB // num_devices}")
 
 
 # ### DataLoader and Validation Setup
@@ -361,10 +362,9 @@ with mesh:
           tokens_per_sec = -1
         else:
           iter_time = (time.time() - start) / trconf.print_interval
-          sub_step_time = iter_time / trconf.grad_accumulation_steps
-          tokens_per_sec = trconf.mB * trconf.T * trconf.grad_accumulation_steps / iter_time
+          tokens_per_sec = trconf.mB * trconf.T / iter_time
 
-        tokens_processed = (step+1) * trconf.grad_accumulation_steps * trconf.mB * trconf.T
+        tokens_processed = (step+1) * trconf.mB * trconf.T
         lr = inverse_sqrt_schedule(step)
         avg_loss = avg_loss.item()
         logits_loss = logits_loss.item()
