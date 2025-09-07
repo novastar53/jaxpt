@@ -177,8 +177,8 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = 10000 * int(111777) #int(236e9)
-  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 16 * num_devices
+  num_tokens_per_batch: int = 2**21 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 128 * num_devices
   T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
