@@ -116,7 +116,7 @@ from flax import nnx
 
 from pprint import pprint
 
-from jaxpt.models import Tiny_MoE_Config, Tiny_MoE
+from jaxpt.models import Tiny_MoE_3_Config, Tiny_MoE_3
 from jaxpt.utils import count_params, create_sharded_model
 
 import tiktoken
@@ -126,11 +126,11 @@ default = jax.random.key(1337)
 gate_noise = jax.random.key(42)
 rngs = nnx.Rngs(default=default, gate_noise=gate_noise)
 
-config = Tiny_MoE_Config(
-                     name="Tiny_MoE",
+config = Tiny_MoE_3_Config(
+                     name="Tiny_MoE_3",
                      dtype=jnp.bfloat16, \
-                     vocab_size=49152,
-                     n_layer=2,
+                     vocab_size=50304,
+                     n_layer=30,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -144,7 +144,7 @@ config = Tiny_MoE_Config(
 pprint(config)
 
 with mesh:
-    m = create_sharded_model(Tiny_MoE, config, rngs)
+    m = create_sharded_model(Tiny_MoE_3, config, rngs)
     #m = load_checkpoint(Tiny_MoE, output_dir, config, "run_20250726_excudate_quilling", 2680, rngs)
     #m = load_checkpoint_from_gcloud(Tiny_MoE, config, output_dir, "alpha_training_runs", "run_20250728_mercapto_inkstand", "120000", rngs)
     #m = from_hf_pretrained(config, rngs)
@@ -176,10 +176,10 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = int(236e9)
-  num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
+  num_tokens: int = 10000 * int(111777) #int(236e9)
+  num_tokens_per_batch: int = 2**18 # 2**19, 0.5 million as per the GPT 3.5 paper
   mB: int = 16 * num_devices
-  T: int = 128
+  T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -256,7 +256,7 @@ assert(trconf.grad_accumulation_steps == 1)
 
 import os
 
-from jaxpt.dataloaders import BlendedCloudDataLoader, CloudDataLoader
+from jaxpt.dataloaders import DataLoader, BlendedCloudDataLoader, CloudDataLoader
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 '''
@@ -266,7 +266,6 @@ train_dl = CloudDataLoader(bucket_name="jaxpt_datasets",
                       block_size=trconf.T,
                       device_rank=1,
                       label="train")
-'''
 
 
 train_dl = BlendedCloudDataLoader(
@@ -281,8 +280,13 @@ train_dl = BlendedCloudDataLoader(
     label="train"
 )
 
+'''
 
-
+train_dl = DataLoader(dirpath="/root/jaxpt/datasets/panchatantra-ryder/processed",
+                      batch_size=trconf.mB,
+                      block_size=trconf.T,
+                      device_rank=1,
+                      label="train")
 
 from jaxpt.utils import append_to_csv
 
