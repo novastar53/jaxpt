@@ -285,9 +285,17 @@ class SoftMOE(nnx.Module):
 
     def __call__(self, x):
         B, T, C = x.shape
-        g = jnp.einsum('ecd,btd->btec', self.w_router_gate, x) # B, T, E, capacity
+        (x, w_gate) = dtypes.promote_dtype(
+            (x, self.w_router_gate,), dtype=self.config.dtype
+        )
+        if self.config.moe_bias:
+            (b_gate,) = dtypes.promote_dtype(
+            (self.b_router_gate,), dtype=self.config.dtype
+        )
+ 
+        g = jnp.einsum('ecd,btd->btec', w_gate, x) # B, T, E, capacity
         if self.config.mlp_bias:
-            g += self.b_router_gate
+            g += b_gate
         g = nnx.with_sharding_constraint(g, spec)
         dispatch_weights = jax.nn.softmax(g, axis=1)
         dispatch_weights = nnx.with_sharding_constraint(dispatch_weights, spec)
