@@ -256,7 +256,7 @@ class SoftMOE(nnx.Module):
         self.w_router_gate = nnx.Param(
             w_router_gate_init(
                 rngs.default(),
-                (config.n_experts, capacity, config.n_embed),
+                (config.n_experts, self.capacity, config.n_embed),
                 config.param_dtype
             )
         )
