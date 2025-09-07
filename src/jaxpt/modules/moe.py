@@ -246,3 +246,51 @@ class MOE(nnx.Module):
         output["y"] = y
         return output
 
+
+class SoftMOE(nnx.Module):
+    def __init__(self, config: Config, rngs: nnx.Rngs):
+        self.config = config
+        capacity =  config.block_size // config.n_experts
+        w_router_gate_init = nnx.with_partitioning(
+            nnx.initializers.normal(stddev=0.02), sharding=(None,))
+        self.w_router_gate = nnx.Param(
+            w_router_gate_init(
+                rngs.default(),
+                (config.n_experts, capacity, config.n_embed),
+                config.param_dtype
+            )
+        )
+        if config.mlp_bias:
+            b_router_gate_init = nnx.with_partitioning(nnx.initializers.zeros, sharding=(None,))
+            self.b_router_gate = nnx.Param(
+                b_router_gate_init(
+                    rngs.default(),
+                    (config.n_experts, capacity),
+                    config.param_dtype
+                )
+            )
+        self.experts = Experts(config, rngs)
+        self.n_experts = config.n_experts
+
+
+    def _dispatch(self, x, w):
+        x = jnp.einsum('tec,td->ecd', w, x)
+        x = self.experts(x)
+        return x
+
+
+    def _combine(self, x, w):
+        x = jnp.einsum('tec,ecd->td', w, x)
+        return x
+
+
+    def __call__(self, x):
+        g = jnp.einsum('ecd,btd->btec', self.w_router_gate, x)
+        if self.config.mlp_bias:
+            g += self.b_router_gate
+        dispatch_weights = jax.nn.softmax(g, axis=1)
+        combine_weights = jax.nn.softmax(g, axis=(2,3))
+        eo = jax.vmap(lambda x, w: self._dispatch(x, w))(x, dispatch_weights)
+        y = jax.vmap(lambda o, w: self._combine(o, w))(eo, combine_weights) # B, T, C
+        return y
+

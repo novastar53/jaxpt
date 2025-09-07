@@ -16,6 +16,7 @@ from .nope_gpt import (
 )
 from .tiny_moe import Tiny_MoE, Tiny_MoE_Config
 from .tiny_moe_2 import Tiny_MoE_2, Tiny_MoE_2_Config
+from .tiny_moe_3 import Tiny_MoE_3, Tiny_MoE_3_Config
 from .smol_lm import SmolLM, SmolLM_Config
 
 __all__ = [
@@ -36,5 +37,7 @@ __all__ = [
     "Tiny_MoE_Config",
     "Tiny_MoE_2",
     "Tiny_MoE_2_Config",
+    "Tiny_MoE_3",
+    "Tiny_MoE_3_Config",
     "from_huggingface_pretrained",
 ]
