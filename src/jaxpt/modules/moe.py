@@ -250,7 +250,7 @@ class MOE(nnx.Module):
 class SoftMOE(nnx.Module):
     def __init__(self, config: Config, rngs: nnx.Rngs):
         self.config = config
-        capacity =  config.block_size // config.n_experts
+        self.capacity =  config.block_size // config.n_experts
         w_router_gate_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02), sharding=(None,))
         self.w_router_gate = nnx.Param(
@@ -275,7 +275,6 @@ class SoftMOE(nnx.Module):
 
     def _dispatch(self, x, w):
         x = jnp.einsum('tec,td->ecd', w, x)
-        x = self.experts(x)
         return x
 
 
@@ -285,12 +284,41 @@ class SoftMOE(nnx.Module):
 
 
     def __call__(self, x):
-        g = jnp.einsum('ecd,btd->btec', self.w_router_gate, x)
+        B, T, C = x.shape
+        g = jnp.einsum('ecd,btd->btec', self.w_router_gate, x) # B, T, E, capacity
         if self.config.mlp_bias:
             g += self.b_router_gate
+        g = nnx.with_sharding_constraint(g, spec)
         dispatch_weights = jax.nn.softmax(g, axis=1)
+        dispatch_weights = nnx.with_sharding_constraint(dispatch_weights, spec)
         combine_weights = jax.nn.softmax(g, axis=(2,3))
-        eo = jax.vmap(lambda x, w: self._dispatch(x, w))(x, dispatch_weights)
-        y = jax.vmap(lambda o, w: self._combine(o, w))(eo, combine_weights) # B, T, C
+        combine_weights = nnx.with_sharding_constraint(combine_weights, spec)
+
+        expert_inputs = jax.vmap(lambda x, w: self._dispatch(x, w))(x, dispatch_weights) # B, E, capacity, C
+        expert_inputs = nnx.with_sharding_constraint(expert_inputs, spec)
+
+        if B % self.n_experts == 0:
+            expert_inputs = expert_inputs.reshape(self.n_experts, -1, self.n_experts, self.capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_inputs = jnp.swapaxes(expert_inputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
+        else:
+            expert_inputs = jnp.swapaxes(expert_inputs, 0, 1) # n_experts, B, expert_cap, C
+
+        expert_inputs = expert_inputs.reshape(-1, C) # n_experts * B * expert_cap, C
+
+        expert_inputs = jax.lax.with_sharding_constraint(expert_inputs, spec)
+        expert_inputs = expert_inputs.reshape(self.n_experts, B * self.capacity, C) # n_experts, B * expert_cap, C
+        expert_outputs = self.experts(expert_inputs)
+
+        if B % self.n_experts == 0:
+            expert_outputs = expert_outputs.reshape(self.n_experts, -1, self.n_experts, self.capacity, C) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_outputs = jnp.swapaxes(expert_outputs, 0, 2) # n_experts, batch_per_expert, n_experts, expert_cap, C
+            expert_outputs = expert_outputs.reshape(B, self.n_experts, self.capacity, C) # B, n_experts, expert_cap, C
+        else:
+            expert_outputs = expert_outputs.reshape(self.n_experts, B, self.capacity, C) # n_experts, B, expert_cap, C
+            expert_outputs = jnp.swapaxes(expert_outputs, 0, 1) # B, n_experts, expert_cap, C
+
+        expert_outputs = nnx.with_sharding_constraint(expert_outputs, spec)
+        y = jax.vmap(lambda o, w: self._combine(o, w))(expert_outputs, combine_weights) # B, T, C
+        y = nnx.with_sharding_constraint(y, spec)
         return y
 
