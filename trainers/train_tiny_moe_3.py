@@ -130,7 +130,7 @@ config = Tiny_MoE_3_Config(
                      name="Tiny_MoE_3",
                      dtype=jnp.bfloat16, \
                      vocab_size=50304,
-                     n_layer=30,
+                     n_layer=2,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -177,11 +177,11 @@ import optax
 @dataclasses.dataclass
 class TrainerConfig:
   num_tokens: int = 10000 * int(111777) #int(236e9)
-  num_tokens_per_batch: int = 2**20 # 2**20 (1.0 million) 
-  mB: int = 64 * num_devices
-  T: int = 2048
+  num_tokens_per_batch: int = 2**8 # 2**20 (1.0 million) 
+  mB: int = 2 * num_devices
+  T: int = 128
   max_steps: int = int(num_tokens // num_tokens_per_batch)
-  max_lr: float = 6e-4
+  max_lr: float = 1e-3
   min_lr: float = max_lr * 0.1
   max_grad_norm: float = 1.0  # Clip gradients to this norm
   warmup_steps: int = max_steps // 100
@@ -213,7 +213,7 @@ def inverse_sqrt_schedule(step):
     regular_lr = trconf.max_lr * jnp.sqrt(trconf.warmup_steps) / jnp.sqrt(step + 1)
     return jnp.where(step < trconf.warmup_steps, warmup_lr, regular_lr)
 
-
+'''
 steps = range(0, trconf.max_steps, 1000)
 total_schedule = [ trapezoidal_schedule(step) for step in steps ]
 import matplotlib.pyplot as plt
@@ -221,7 +221,7 @@ plt.figure(figsize=(3,2))
 plt.plot(steps, total_schedule)
 plt.title("LR Schedule")
 plt.show()
-
+'''
 # Generate a weight decay mask
 # First split the model into params and variables
 graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
@@ -229,7 +229,7 @@ graphdef, params, variables = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree.map(lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param))
 
 tx = optax.chain(
-    #optax.clip_by_global_norm(trconf.max_grad_norm),
+    optax.clip_by_global_norm(trconf.max_grad_norm),
     optax.adamw(trapezoidal_schedule, b1=0.9, b2=0.95, weight_decay=0.1, mask=weight_decay_mask),
 )
 optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
@@ -282,7 +282,7 @@ train_dl = BlendedCloudDataLoader(
 
 '''
 
-train_dl = DataLoader(dirpath="/root/jaxpt/datasets/panchatantra-ryder/processed",
+train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
                       batch_size=trconf.mB,
                       block_size=trconf.T,
                       device_rank=1,

@@ -288,7 +288,7 @@ class SoftMOE(nnx.Module):
         (x, w_gate) = dtypes.promote_dtype(
             (x, self.w_router_gate,), dtype=self.config.dtype
         )
-        if self.config.moe_bias:
+        if self.config.mlp_bias:
             (b_gate,) = dtypes.promote_dtype(
             (self.b_router_gate,), dtype=self.config.dtype
         )
