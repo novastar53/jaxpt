@@ -11,7 +11,7 @@ from typing import Literal
 
 import os
 
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -154,7 +154,8 @@ config = Tiny_MoE_Config(
                      dtype=jnp.bfloat16, \
                      vocab_size=50304,
                      n_experts=16,
-                     n_layer=2,
+                     top_k=4,
+                     n_layer=30,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -228,10 +229,10 @@ import optax
 
 @dataclasses.dataclass
 class TrainerConfig:
-  num_tokens: int = 10000 * int(111777) #int(236e9)
-  num_tokens_per_batch: int = 2**11 # 2**19, 0.5 million as per the GPT 3.5 paper
-  mB: int = 2 * num_devices
-  T: int = 128
+  num_tokens: int = int(236e9)
+  num_tokens_per_batch: int = 2**20 # 2**19, 0.5 million as per the GPT 3.5 paper
+  mB: int = 32 * config.n_experts
+  T: int = 2048
   max_steps: int = int(num_tokens // num_tokens_per_batch)
   max_lr: float = 6e-4
   min_lr: float = max_lr * 0.1
@@ -311,14 +312,15 @@ import os
 
 from jaxpt.dataloaders import DataLoader, BlendedCloudDataLoader, CloudDataLoader
 
+'''
 train_dl = DataLoader(dirpath="datasets/panchatantra-ryder/processed",
                       batch_size=trconf.mB,
                       block_size=trconf.T,
                       device_rank=1,
                       label="train")
+
+
 '''
-
-
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./alpha-448101-282bc1b884cd.json"
 train_dl = CloudDataLoader(bucket_name="jaxpt_datasets",
                       bucket_prefix="fineweb-edu-100b/processed",
@@ -328,6 +330,7 @@ train_dl = CloudDataLoader(bucket_name="jaxpt_datasets",
                       label="train")
 
 
+'''
 train_dl = BlendedCloudDataLoader(
     device_rank=1,
     block_size=trconf.T,
