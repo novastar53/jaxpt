@@ -10,7 +10,7 @@ from typing import Literal
 
 import os
 
-#os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
 
 import jax
 
@@ -142,7 +142,7 @@ from flax import nnx
 # In[6]:
 from pprint import pprint
 
-from jaxpt.infer import generate_completions, generate
+from jaxpt.infer import generate_completion_slow, generate_chat
 from jaxpt.models import Tiny_MoE_Config, Tiny_MoE
 from jaxpt.utils import count_params, create_sharded_model
 
@@ -158,7 +158,7 @@ config = Tiny_MoE_Config(
                      name="Tiny_MoE_Panchatantra",
                      dtype=jnp.bfloat16, \
                      #vocab_size=49152,
-                     n_layer=30,
+                     n_layer=4,
                      block_size=2048,
                      n_head=9,
                      n_kv_head=3,
@@ -199,9 +199,9 @@ import orbax.checkpoint as ocp
 
 # Set up save and load optimizer
 
-def save_optimizer_state(optimizer):
+def save_optimizer_state(model):
   state_dirpath = (
-    output_dir / optimizer.model.config.name / "optimizer_checkpoints" / run_dirname
+    output_dir / model.config.name / "optimizer_checkpoints" / run_dirname
   )
   state_dirpath.mkdir(parents=True, exist_ok=True)
   _, state = nnx.split(optimizer)
@@ -295,7 +295,7 @@ tx = optax.chain(
     #optax.adafactor(trapezoidal_schedule, weight_decay_rate=0.1, weight_decay_mask=weight_decay_mask)
     #optax.adam(trapezoidal_schedule)
 )
-optimizer = nnx.Optimizer(m, tx)
+optimizer = nnx.Optimizer(m, tx, wrt=nnx.Param)
 
 #optimizer = load_optimizer_state(m, optimizer, "run_20250726_excudate_quilling", 2680)
 
@@ -355,7 +355,7 @@ train_dl = HuggingfaceDataLoader(batch_size=trconf.mB,
 #                      device_rank=1,
 #                      label="train")
 
-train_dl = DataLoader(dirpath="/root/jaxpt/datasets/panchatantra-ryder/processed",
+train_dl = DataLoader(dirpath="/Users/vikram/dev/jaxpt/datasets/panchatantra-ryder/processed",
                       batch_size=trconf.mB,
                       block_size=trconf.T,
                       device_rank=1,
@@ -404,7 +404,7 @@ def train_step(model, optimizer, batch, target):
 
 with mesh:
   data_sharding = NamedSharding(mesh, PartitionSpec("devices",))
-  m.train(add_noise=True, aux_loss=True)
+  m.train(add_noise=False, load_balance_loss=True, z_loss=False)
   try:
     while optimizer.step.value.item() < trconf.max_steps:
       step = optimizer.step.value.item()
@@ -438,7 +438,7 @@ with mesh:
       if step > 0 and step % trconf.checkpoint_interval == 0:
         print(f"Saving checkpoint at step {step}")
         save_checkpoint(m, output_dir, run_dirname, step)
-        save_optimizer_state(optimizer)
+        save_optimizer_state(m)
   except KeyboardInterrupt:
       print("Received KeyboardInterrupt. Exiting...")
   finally:
@@ -448,5 +448,5 @@ with mesh:
     plt.savefig(log_dir / f"{run_dirname}.png", dpi=300, bbox_inches="tight", transparent=True)
 
     save_checkpoint(m, output_dir, run_dirname, optimizer.step.value.item())
-    save_optimizer_state(optimizer)
+    save_optimizer_state(m)
     print("Done.")
