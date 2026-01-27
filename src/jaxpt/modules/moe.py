@@ -274,12 +274,12 @@ class SoftMOE(nnx.Module):
 
 
     def _dispatch(self, x, w):
-        x = jnp.einsum('tec,td->ecd', w, x)
+        x = jnp.einsum('td,tec->ecd', x, w)
         return x
 
 
     def _combine(self, x, w):
-        x = jnp.einsum('tec,ecd->td', w, x)
+        x = jnp.einsum('ecd,tec->td', x, w)
         return x
 
 
