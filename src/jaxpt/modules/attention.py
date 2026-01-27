@@ -230,7 +230,7 @@ class GQ_Attention(SelfAttentionBase):
         )  # (B, x_T, n_kv_head * C // n_head)
 
         if self.config.use_cache is True and self.key_cache is not None:
-            q_prev = jnp.zeros((B, self.key_cache.shape[1], C), dtype=jnp.bfloat16)
+            q_prev = jnp.zeros((B, self.key_cache.shape[1], C), dtype=q.dtype)
             q = jnp.concat([q_prev, q], axis=1)
             k = jnp.concat((self.key_cache, k), axis=1) 
             v = jnp.concat((self.value_cache, v), axis=1)
@@ -255,21 +255,55 @@ class GQ_Attention(SelfAttentionBase):
 
 class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
     def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
-        GQ_Attention.__init__(self, config, rngs) 
+        GQ_Attention.__init__(self, config, rngs)
         RoPE_Llama.__init__(self, omega=rope_omega)
 
+    def __call__(self, x, mask=None):
+        B, x_T, C = x.shape
+        head_dim = C // self.n_head
 
-    def _apply_attn(self, q, k, v, mask):
-        B, _, C = q.shape
-        q = q.reshape((B, -1, self.n_head, C // self.n_head))
-        k = k.reshape((B, -1, self.n_kv_head, C // self.n_head))
-        v = v.reshape((B, -1, self.n_kv_head, C // self.n_head))
-        q = self.apply_rope(q)
-        k = self.apply_rope(k)
+        q = self.wq(x)  # (B, x_T, C)
+        kv = self.wkv(x)  # (B, x_T, 2 * n_kv_head * head_dim)
+        k, v = jnp.split(kv, 2, axis=-1)  # (B, x_T, n_kv_head * head_dim)
+
+        # Reshape to head format for RoPE
+        q = q.reshape((B, x_T, self.n_head, head_dim))
+        k = k.reshape((B, x_T, self.n_kv_head, head_dim))
+        v = v.reshape((B, x_T, self.n_kv_head, head_dim))
+
+        if self.config.use_cache is True and self.key_cache is not None:
+            cache_len = self.key_cache.shape[1]
+
+            # Apply RoPE to new tokens only, with position offset
+            q = self.apply_rope(q, offset=cache_len)
+            k = self.apply_rope(k, offset=cache_len)
+
+            # Pad q with zeros for cached positions
+            q_prev = jnp.zeros((B, cache_len, self.n_head, head_dim), dtype=q.dtype)
+            q = jnp.concat([q_prev, q], axis=1)
+
+            # Concatenate cached (post-RoPE) with new (post-RoPE)
+            k = jnp.concat((self.key_cache, k), axis=1)
+            v = jnp.concat((self.value_cache, v), axis=1)
+        else:
+            # No cache or first call - apply RoPE from position 0
+            q = self.apply_rope(q, offset=0)
+            k = self.apply_rope(k, offset=0)
+
+        # Compute attention
         y = _calc_attention(
             q, k, v, implementation=self.implementation, mask=mask
-        )  # (B, T, n_head, C // n_head)
+        )
+
+        if self.config.use_cache is True:
+            if self.key_cache is not None:
+                y = y[:, -x_T:, ...]  # Only return new positions
+            # Cache post-RoPE k/v, truncated to block_size
+            self.key_cache = k[:, -self.config.block_size:, :]
+            self.value_cache = v[:, -self.config.block_size:, :]
+
         y = jnp.reshape(y, (B, -1, C))
+        y = self.wproj(y)
         return y
 
 
