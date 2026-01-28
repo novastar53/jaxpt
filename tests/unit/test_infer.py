@@ -16,7 +16,6 @@ from jaxpt.infer import (
     generate_completion_slow,
     generate_completion_fast,
     generate_completions,
-    generate_completions_with_cache,
     generate,
 )
 
@@ -38,11 +37,10 @@ def test_generate_step_signature():
 
 
 def test_generate_functions_exist():
-    """Test that all expected generation functions exist."""
+    """Test that all expected generation functions exist after consolidation."""
     assert callable(generate_completion_slow)
     assert callable(generate_completion_fast)
     assert callable(generate_completions)
-    assert callable(generate_completions_with_cache)
     assert callable(generate)
     print("✓ All generation functions exist")
 
@@ -78,15 +76,21 @@ def test_generate_step_returns_tuple():
     print("✓ _generate_step returns tuple (sample_idxs, key)")
 
 
-def test_generate_completions_delegates():
-    """Test that generate_completions delegates correctly."""
+def test_generate_completions_implementation():
+    """Test that generate_completions has proper implementation."""
     import inspect
 
     source = inspect.getsource(generate_completions)
     assert (
-        "generate_completion_slow" in source
-    ), "generate_completions should call generate_completion_slow"
-    print("✓ generate_completions delegates to generate_completion_slow")
+        "_generate_step" in source
+    ), "generate_completions should call _generate_step"
+    assert (
+        "attn_mask" in source
+    ), "generate_completions should handle attention masks"
+    assert (
+        "jnp.concatenate" in source
+    ), "generate_completions should concatenate tokens"
+    print("✓ generate_completions has proper implementation")
 
 
 def test_generate_alias():
@@ -107,7 +111,7 @@ if __name__ == "__main__":
     test_generate_functions_exist()
     test_partial_not_used_in_generate_functions()
     test_generate_step_returns_tuple()
-    test_generate_completions_delegates()
+    test_generate_completions_implementation()
     test_generate_alias()
 
     print("\n✅ All bug fix verification tests passed!")

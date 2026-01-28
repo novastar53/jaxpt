@@ -94,54 +94,7 @@ def generate_completion_fast(
     x = jnp.tile(tokens, (num_completions, 1))
     while x.shape[1] < max_length:
         x_next, key = _generate_step(model, x, attn_mask, temperature, key)
-        x = x_next
-    output = []
-    for i in range(num_completions):
-        tokens = x[i, :max_length].tolist()
-        decoded = enc.decode(tokens)
-        output.append(decoded)
-    return output
-
-
-def generate_completions_with_cache(
-    model,
-    enc=None,
-    prefix="Hello, I'm a language model,",
-    attn_mask: jax.Array | None = None,
-    num_completions=8,
-    max_length=20,
-    temperature=0.2,
-    key=None,
-):
-    """
-    Generate completions using KV caching for efficiency.
-    This function creates a cached version of model for autoregressive generation.
-    """
-    if enc is None:
-        enc = tiktoken.get_encoding("gpt2")
-    if key is None:
-        key = jax.random.PRNGKey(1337)
-
-    tokens = enc.encode(prefix)
-    tokens = jnp.array(tokens, dtype=jnp.int32)
-    tokens = jnp.expand_dims(tokens, axis=0)
-    x = jnp.tile(tokens, (num_completions, 1))
-
-    if attn_mask is None:
-        attn_mask = jnp.ones((num_completions, x.shape[1]), dtype=jnp.bool_)
-
-    x_next, key = _generate_step(model, x, attn_mask, temperature, key)
-    x = jnp.concatenate((tokens, x_next), axis=1)
-
-    while x.shape[1] < max_length:
-        if attn_mask is not None:
-            attn_mask = jnp.concatenate(
-                (attn_mask, jnp.ones((num_completions, 1), dtype=jnp.bool_)),
-                axis=1,
-            )
-        x_next, key = _generate_step(model, x, attn_mask, temperature, key)
         x = jnp.concatenate((x, x_next), axis=1)
-
     output = []
     for i in range(num_completions):
         tokens = x[i, :max_length].tolist()
@@ -217,7 +170,7 @@ def generate_chat(
     system_prompt="You are a helpful assistant.",
     question="What is photosynthesis?",
     format: Literal["chatml", "completion"] = "completion",
-    stop_tokens=("<|endoftext|>", "<|im_end|>"),
+    stop_tokens=("<|im_end|>", "<|im_end|>"),
     temperature=0.2,
     top_k=50,
     key=None,
