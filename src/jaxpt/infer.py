@@ -13,20 +13,29 @@ from jaxpt.chatml import format_as_gpt4_chatml_and_tokenize
 
 logger = logging.getLogger(__name__)
 
+
+def top_k_sampling(logits, key, k=50):
+    """
+    Sample from top-k logits.
+    """
+    top_k_vals, top_k_indices = jax.lax.top_k(logits, k)
+    key, subkey = jax.random.split(key)
+    top_k_logit_idxs = jax.random.categorical(subkey, top_k_vals)
+    top_k_logit_idxs = top_k_logit_idxs[..., None]
+    sample_idxs = jnp.take_along_axis(top_k_indices, top_k_logit_idxs, axis=-1)
+    return sample_idxs, key
+
+
 @nnx.jit
 def _generate_step(m, x, attn_mask, temperature, key):
     logits = m(x, mask=attn_mask) / temperature
     x_new = logits[:, -1, :]
     top_k_vals, top_k_indices = jax.lax.top_k(x_new, 50)
     key, subkey = jax.random.split(key)
-    top_k_logit_idxs = jax.random.categorical(
-        subkey, top_k_vals
-    )
-    top_k_logit_idxs = top_k_logit_idxs[..., None]  # expand dims
-    sample_idxs = jnp.take_along_axis(
-        top_k_indices, top_k_logit_idxs, axis=-1
-    )
-    return sample_idxs
+    top_k_logit_idxs = jax.random.categorical(subkey, top_k_vals)
+    top_k_logit_idxs = top_k_logit_idxs[..., None]
+    sample_idxs = jnp.take_along_axis(top_k_indices, top_k_logit_idxs, axis=-1)
+    return sample_idxs, key
 
 
 def generate_completion_slow(
@@ -49,11 +58,13 @@ def generate_completion_slow(
     tokens = jnp.expand_dims(tokens, axis=0)
     x = jnp.tile(tokens, (num_completions, 1))
     while x.shape[1] < max_length:
-        x_next = _generate_step(model, x, attn_mask, temperature, key)
-        x = jnp.concatenate((x, x_next), axis=1)  # (B, T+1)#
+        x_next, key = _generate_step(model, x, attn_mask, temperature, key)
+        x = jnp.concatenate((x, x_next), axis=1)
         if attn_mask:
-            attn_mask = jnp.concatenate((attn_mask, 
-                                        jnp.ones((attn_mask.shape[0], 1), dtype=jnp.bool)), axis=1)
+            attn_mask = jnp.concatenate(
+                (attn_mask, jnp.ones((attn_mask.shape[0], 1), dtype=jnp.bool)),
+                axis=1,
+            )
     output = []
     for i in range(num_completions):
         tokens = x[i, :max_length].tolist()
@@ -81,9 +92,8 @@ def generate_completion_fast(
     tokens = jnp.array(tokens, dtype=jnp.int32)
     tokens = jnp.expand_dims(tokens, axis=0)
     x = jnp.tile(tokens, (num_completions, 1))
-    #attn_mask = jnp.ones((attn_mask.shape[0], 1), dtype=jnp.bool)
     while x.shape[1] < max_length:
-        x_next = _generate_step(model, x, attn_mask, temperature, key)
+        x_next, key = _generate_step(model, x, attn_mask, temperature, key)
         x = x_next
     output = []
     for i in range(num_completions):
@@ -91,6 +101,113 @@ def generate_completion_fast(
         decoded = enc.decode(tokens)
         output.append(decoded)
     return output
+
+
+def generate_completions_with_cache(
+    model,
+    enc=None,
+    prefix="Hello, I'm a language model,",
+    attn_mask: jax.Array | None = None,
+    num_completions=8,
+    max_length=20,
+    temperature=0.2,
+    key=None,
+):
+    """
+    Generate completions using KV caching for efficiency.
+    This function creates a cached version of model for autoregressive generation.
+    """
+    if enc is None:
+        enc = tiktoken.get_encoding("gpt2")
+    if key is None:
+        key = jax.random.PRNGKey(1337)
+
+    tokens = enc.encode(prefix)
+    tokens = jnp.array(tokens, dtype=jnp.int32)
+    tokens = jnp.expand_dims(tokens, axis=0)
+    x = jnp.tile(tokens, (num_completions, 1))
+
+    if attn_mask is None:
+        attn_mask = jnp.ones((num_completions, x.shape[1]), dtype=jnp.bool_)
+
+    x_next, key = _generate_step(model, x, attn_mask, temperature, key)
+    x = jnp.concatenate((tokens, x_next), axis=1)
+
+    while x.shape[1] < max_length:
+        if attn_mask is not None:
+            attn_mask = jnp.concatenate(
+                (attn_mask, jnp.ones((num_completions, 1), dtype=jnp.bool_)),
+                axis=1,
+            )
+        x_next, key = _generate_step(model, x, attn_mask, temperature, key)
+        x = jnp.concatenate((x, x_next), axis=1)
+
+    output = []
+    for i in range(num_completions):
+        tokens = x[i, :max_length].tolist()
+        decoded = enc.decode(tokens)
+        output.append(decoded)
+    return output
+
+
+def generate_completions(
+    model,
+    enc=None,
+    prefix="Hello, I'm a language model,",
+    num_completions=8,
+    max_length=20,
+    temperature=0.2,
+    key=None,
+):
+    """
+    Generate multiple completions using slow but robust generation method.
+    This is the recommended function for most use cases.
+
+    Args:
+        model: The model to use for generation
+        enc: Tokenizer/encoder (defaults to gpt2 tiktoken)
+        prefix: Starting text to complete
+        num_completions: Number of completions to generate
+        max_length: Maximum length of generated sequence
+        temperature: Sampling temperature (lower = more deterministic)
+        key: JAX random key
+
+    Returns:
+        List of generated completions
+    """
+    return generate_completion_slow(
+        model=model,
+        enc=enc,
+        prefix=prefix,
+        attn_mask=None,
+        num_completions=num_completions,
+        max_length=max_length,
+        temperature=temperature,
+        key=key,
+    )
+
+
+def generate(
+    model,
+    enc=None,
+    prefix="Hello, I'm a language model,",
+    num_completions=8,
+    max_length=20,
+    temperature=0.2,
+    key=None,
+):
+    """
+    Alias for generate_completions for backward compatibility.
+    """
+    return generate_completions(
+        model=model,
+        enc=enc,
+        prefix=prefix,
+        num_completions=num_completions,
+        max_length=max_length,
+        temperature=temperature,
+        key=key,
+    )
 
 
 def generate_chat(
