@@ -44,7 +44,7 @@ class Tiny_MoE_2_Config(Config):
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
     )
-    rope_theta: int = int(1e-4)  # base frequency for rope
+    rope_theta: float = 1e-4  # base frequency for rope
     init_stddev: float = 0.02  # stddev for layer init
     use_cache: bool = False  # use kv caching
     pad_token: str = "<pad>"
