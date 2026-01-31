@@ -30,6 +30,7 @@ logging.basicConfig(
 
 # Add jaxpt to path
 import sys
+
 jaxpt_dir = str(Path(__file__).absolute().parent.parent / "src")
 sys.path.insert(0, jaxpt_dir)
 
@@ -132,6 +133,7 @@ class TrainerConfig:
     num_tokens: int = int(100e9)
     num_tokens_per_batch: int = 2**18  # 2**20 = 1.0 million
     mB: int = 16 * num_devices
+    warmup_mB: int = 2 * num_devices
     T: int = config.block_size
     max_steps: int = int(num_tokens // num_tokens_per_batch)
     max_lr: float = 1e-3
@@ -156,7 +158,9 @@ trconf = TrainerConfig()
 # Set up optimizer
 def inverse_sqrt_schedule(step):
     warmup_lr = trconf.max_lr * (step + 1) / trconf.warmup_steps
-    regular_lr = trconf.max_lr * jnp.sqrt(trconf.warmup_steps) / jnp.sqrt(step + 1)
+    regular_lr = (
+        trconf.max_lr * jnp.sqrt(trconf.warmup_steps) / jnp.sqrt(step + 1)
+    )
     return jnp.where(step < trconf.warmup_steps, warmup_lr, regular_lr)
 
 
@@ -164,7 +168,9 @@ def inverse_sqrt_schedule(step):
 # Exclude biases and layer norm /rms norm parameters
 graphdef, params, _ = nnx.split(m, nnx.Param, nnx.Variable)
 weight_decay_mask = jax.tree.map(
-    lambda x: len(x.value.shape) > 1, params, is_leaf=lambda n: isinstance(n, nnx.Param)
+    lambda x: len(x.value.shape) > 1,
+    params,
+    is_leaf=lambda n: isinstance(n, nnx.Param),
 )
 
 tx = optax.chain(
@@ -197,6 +203,14 @@ logger.info(f"Effective batch size per device: {trconf.mB // num_devices}")
 assert trconf.mB * trconf.T == trconf.num_tokens_per_batch
 
 # Set up Dataloader
+
+warmup_dl = HuggingfaceDataLoader(
+    dirpath="datasets/fineweb-edu/fineweb100B",
+    batch_size=trconf.warmup_mB,
+    block_size=trconf.T,
+    device_rank=1,
+    label="train",
+)
 
 train_dl = HuggingfaceDataLoader(
     dirpath="datasets/fineweb-edu/fineweb100B",
@@ -231,9 +245,9 @@ def moe_loss_fn(model, batch, targets):
 
 @nnx.jit
 def step_fn(model, optimizer, batch, target):
-    (loss, (logits_loss, load_balance_loss, z_loss)), grads = nnx.value_and_grad(
-        moe_loss_fn, has_aux=True
-    )(model, batch, target)
+    (loss, (logits_loss, load_balance_loss, z_loss)), grads = (
+        nnx.value_and_grad(moe_loss_fn, has_aux=True)(model, batch, target)
+    )
     optimizer.update(model, grads)
     return loss, logits_loss, load_balance_loss, z_loss
 
@@ -242,7 +256,9 @@ def step_fn(model, optimizer, batch, target):
 def compute_val_loss(model, x, y):
     """Compute loss without computing gradients."""
     logits, load_balance_loss, z_loss = model(x)
-    logits_loss = optax.softmax_cross_entropy_with_integer_labels(logits, y).mean()
+    logits_loss = optax.softmax_cross_entropy_with_integer_labels(
+        logits, y
+    ).mean()
     loss = (
         logits_loss
         + model.config.load_balance_loss_coeff * load_balance_loss
@@ -316,7 +332,8 @@ with mesh:
     try:
         while optimizer.step.value.item() < trconf.max_steps:
             step = optimizer.step.value.item()
-            batch, target = train_dl()
+            dl = warmup_dl if step == 0 else train_dl
+            batch, target = dl()
             batch = jax.device_put(batch.squeeze(), data_sharding)
             target = jax.device_put(target.squeeze(), data_sharding)
             avg_loss, logits_loss, load_balance_loss, z_loss = step_fn(
@@ -331,7 +348,10 @@ with mesh:
                     total_time = time.time() - start
                     iter_time = total_time / trconf.print_interval
                     tokens_per_sec = (
-                        trconf.print_interval * trconf.mB * trconf.T / total_time
+                        trconf.print_interval
+                        * trconf.mB
+                        * trconf.T
+                        / total_time
                     )
 
                 tokens_processed = (step + 1) * trconf.mB * trconf.T
@@ -412,7 +432,9 @@ with mesh:
             transparent=True,
         )
         if trconf.checkpoint_model:
-            save_checkpoint(m, output_dir, run_name, optimizer.step.value.item())
+            save_checkpoint(
+                m, output_dir, run_name, optimizer.step.value.item()
+            )
         if trconf.checkpoint_optimizer:
             save_optimizer_state(output_dir, run_name, config, optimizer)
         logger.info("Training completed.")
