@@ -100,8 +100,7 @@ class Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        if config.moe_router_bias is True:
-            moe_config = replace(config, mlp_bias=True)
+        moe_config = replace(config, mlp_bias=True) if config.moe_router_bias else config
         self.moe = MOE(moe_config, rngs)
         self.aux_loss = False
 

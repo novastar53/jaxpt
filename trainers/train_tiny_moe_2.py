@@ -115,11 +115,10 @@ config = Tiny_MoE_2_Config(
 logger.info(f"Model config:\n{pformat(config)}")
 
 mesh = Mesh(jax.devices(), ["devices"])
-with mesh:
-    m = create_sharded_model(Tiny_MoE_2, config, rngs)
-    graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
-    total_params = count_params(m)
-    moe_params = count_params(m, "moe")
+m = create_sharded_model(Tiny_MoE_2, config, rngs, mesh)
+graphdef, rngstate, state = nnx.split(m, nnx.RngState, ...)
+total_params = count_params(m)
+moe_params = count_params(m, "moe")
 
 logger.info(f"Parameter Count: {total_params:,}")
 logger.info(f"Sharded / MoE Parameter Count: {moe_params:,}")

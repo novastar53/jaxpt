@@ -35,14 +35,15 @@ def append_to_csv(file_path, row):
 # Model Loaders
 
 
-@nnx.jit(static_argnums=(0, 1))
-def create_sharded_model(Model, config, rngs):
-    model = Model(config=config, rngs=rngs)
-    state = nnx.state(model)
-    pspecs = nnx.get_partition_spec(state)
-    sharded_state = nnx.with_sharding_constraint(state, pspecs)
-    nnx.update(model, sharded_state)
-    return model
+@nnx.jit(static_argnums=(0, 1, 3))
+def create_sharded_model(Model, config, rngs, mesh: jax.sharding.Mesh):
+    with mesh:
+        model = Model(config=config, rngs=rngs)
+        state = nnx.state(model)
+        pspecs = nnx.get_partition_spec(state)
+        sharded_state = nnx.with_sharding_constraint(state, pspecs)
+        nnx.update(model, sharded_state)
+        return model
 
 
 # Model State PyTree Manipulation
