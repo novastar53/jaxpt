@@ -40,7 +40,6 @@ class Tiny_MoE_2_Config(Config):
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
     use_qk_norm: bool = True  # apply RMSNorm to Q and K before RoPE
     use_squared_relu: bool = True  # use squared ReLU activation in MoE experts
-    glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
     )

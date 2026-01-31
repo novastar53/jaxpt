@@ -8,4 +8,3 @@ source $HOME/.local/bin/env
 make regen-lock
 make install
 make dev
-make gcloud
