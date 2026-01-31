@@ -233,8 +233,7 @@ val_dl = HuggingfaceDataLoader(
 # Loss function
 def moe_loss_fn(model, batch, targets):
     logits, load_balance_loss, z_loss = model(batch)
-    loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    logit_loss = loss.mean()
+    logit_loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
     loss = (
         logit_loss
         + model.config.load_balance_loss_coeff * load_balance_loss
