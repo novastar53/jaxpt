@@ -2,23 +2,20 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 from flax.nnx.nn import dtypes
-from jax.sharding import PartitionSpec
 
 from jaxpt.modules.config import Config
-
-
-spec = PartitionSpec("devices",)
 
 
 class Experts(nnx.Module):
     def __init__(self, config, rngs):
         self.config = config
         self.use_squared_relu = getattr(config, "use_squared_relu", False)
+        spec = config.expert_partition_spec
 
         w_c_fc_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02),
             sharding=spec)
-        
+
         w_c_proj_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
             sharding=spec
@@ -32,7 +29,7 @@ class Experts(nnx.Module):
             ),
             config.param_dtype
         ))
-        
+
         self.w_gate = nnx.Param(w_c_fc_init(rngs.default(),
         (
             config.n_experts,
@@ -84,20 +81,24 @@ class Experts(nnx.Module):
 
 
     def __call__(self, x):
-        (x, w_c_fc, w_gate, w_c_proj) = dtypes.promote_dtype(
-            (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value), dtype=self.config.dtype
-        )
+        spec = self.config.expert_partition_spec
         if self.config.moe_bias:
-            (b_c_fc, b_gate, b_c_proj) = dtypes.promote_dtype(
-            (self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value), dtype=self.config.dtype
-        )
+            (x, w_c_fc, w_gate, w_c_proj, b_c_fc, b_gate, b_c_proj) = dtypes.promote_dtype(
+                (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value,
+                 self.b_c_fc.value, self.b_gate.value, self.b_c_proj.value),
+                dtype=self.config.dtype
+            )
+        else:
+            (x, w_c_fc, w_gate, w_c_proj) = dtypes.promote_dtype(
+                (x, self.w_c_fc.value, self.w_gate.value, self.w_c_proj.value),
+                dtype=self.config.dtype
+            )
         x = jax.lax.with_sharding_constraint(x, spec)
+        g = jnp.einsum('eti,eih->eth', x, w_gate)
         h = jnp.einsum('eti,eih->eth', x, w_c_fc)
         if self.config.moe_bias:
-            h += b_c_fc
-        g = jnp.einsum('eti,eih->eth', x, w_gate)
-        if self.config.moe_bias:
             g += b_gate
+            h += b_c_fc
         # Apply activation: squared ReLU or SiLU (default)
         if self.use_squared_relu:
             h = (nnx.relu(g) ** 2) * h
@@ -185,30 +186,29 @@ class MOE(nnx.Module):
 
     def __call__(self, x):
         '''
-        Expert routing based on the vmoe implementation: 
+        Expert routing based on the vmoe implementation:
         https://github.com/google-research/vmoe/blob/main/vmoe/nn/routing.py
         '''
         output = {}
         B, T, C = x.shape
+        spec = self.config.expert_partition_spec
         gate_logits = self.router_gate(x) # B, T, n_experts
         if self.z_loss:
-            z_loss = jnp.sum(jnp.square(jnp.log(jnp.sum(jnp.exp(gate_logits), axis=-1)))) / (B * T) 
+            z_loss = jnp.sum(jnp.square(jnp.log(jnp.sum(jnp.exp(gate_logits), axis=-1)))) / (B * T)
             output["z_loss"] = z_loss
         if self.add_noise:
-            #noise = jax.random.normal(self.gate_noise_rngstream(), 
-            #                          gate_logits.shape, dtype=self.config.dtype) * (1/self.n_experts)
-            noise = jax.random.uniform(self.gate_noise_rngstream(), gate_logits.shape, 
-                                       self.config.dtype, 1-1e-2, 1+1e-2) 
+            noise = jax.random.uniform(self.gate_noise_rngstream(), gate_logits.shape,
+                                       self.config.dtype, 1-1e-2, 1+1e-2)
             gate_logits *= noise
         gate_probs = jax.nn.softmax(gate_logits)
 
         expert_capacity_per_batch = int(self.load_factor * self.top_k * max(1, T / self.n_experts))
-        (top_k_probs, 
-         expert_positions, 
-         expert_indices, 
+        (top_k_probs,
+         expert_positions,
+         expert_indices,
          expert_inputs) = jax.vmap(
-            lambda x, l: self._get_expert_inputs(x, l, expert_capacity_per_batch))(x, gate_probs) # B, n_experts, expert_cap, C 
-        
+            lambda x, l: self._get_expert_inputs(x, l, expert_capacity_per_batch))(x, gate_probs) # B, n_experts, expert_cap, C
+
         top_k_probs = jax.lax.with_sharding_constraint(top_k_probs, spec)
         expert_positions = jax.lax.with_sharding_constraint(expert_positions, spec)
         expert_indices = jax.lax.with_sharding_constraint(expert_indices, spec)
@@ -289,6 +289,7 @@ class SoftMOE(nnx.Module):
 
     def __call__(self, x):
         B, T, C = x.shape
+        spec = self.config.expert_partition_spec
         (x, w_gate) = dtypes.promote_dtype(
             (x, self.w_router_gate,), dtype=self.config.dtype
         )
@@ -296,7 +297,7 @@ class SoftMOE(nnx.Module):
             (b_gate,) = dtypes.promote_dtype(
             (self.b_router_gate,), dtype=self.config.dtype
         )
- 
+
         g = jnp.einsum('ecd,btd->btec', w_gate, x) # B, T, E, capacity
         if self.config.mlp_bias:
             g += b_gate

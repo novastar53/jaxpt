@@ -5,6 +5,7 @@ import jax
 import flax.nnx as nnx
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
+from jax.sharding import PartitionSpec
 
 from jaxpt.modules.config import Config
 from jaxpt.modules.attention import GQ_Attention_w_RoPE
@@ -65,6 +66,7 @@ class Tiny_MoE_2_Config(Config):
 
     embed_partition_spec: tuple = (None,)
     rmsnorm_partition_spec: tuple = (None,)
+    expert_partition_spec: PartitionSpec = PartitionSpec("devices",)
 
 
 
