@@ -108,11 +108,9 @@ class Block(nnx.Module):
         self.aux_loss = False
 
     def __call__(self, x, mask=None):
-        x = self.attn(self.rms_n_1(x), mask=mask) + x
-        x = jax.lax.with_sharding_constraint(x, self.config.expert_partition_spec)
+        x = x + self.attn(self.rms_n_1(x), mask=mask)
         output = self.moe(self.rms_n_2(x))
         x = x + output["y"]
-        x = jax.lax.with_sharding_constraint(x, self.config.expert_partition_spec)
         output["y"] = x
         return output
 
@@ -161,7 +159,6 @@ class Tiny_MoE_2(nnx.Module):
 
     def __call__(self, idx, mask=None):
         x = self.wte(idx)
-        x = jax.lax.with_sharding_constraint(x, self.config.expert_partition_spec)
         total_load_balance_loss = 0
         total_z_loss = 0
         for i in range(self.n_layer):
@@ -172,9 +169,7 @@ class Tiny_MoE_2(nnx.Module):
             if self.z_loss:
                 total_z_loss += output["z_loss"]
         x = self.rms_n_f(x)
-        x = jax.lax.with_sharding_constraint(x, self.config.expert_partition_spec)
         logits = self.wte.attend(x)
-        logits = jax.lax.with_sharding_constraint(logits, self.config.expert_partition_spec)
         return logits, total_load_balance_loss, total_z_loss
     
             
