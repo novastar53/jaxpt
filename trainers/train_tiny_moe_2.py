@@ -204,13 +204,13 @@ assert trconf.mB * trconf.T == trconf.num_tokens_per_batch
 
 # Set up Dataloader
 
-warmup_dl = HuggingfaceDataLoader(
-    dirpath="datasets/fineweb-edu/fineweb100B",
-    batch_size=trconf.warmup_mB,
-    block_size=trconf.T,
-    device_rank=1,
-    label="train",
-)
+#warmup_dl = HuggingfaceDataLoader(
+#    dirpath="datasets/fineweb-edu/fineweb100B",
+#    batch_size=trconf.warmup_mB,
+#    block_size=trconf.T,
+#    device_rank=1,
+#    label="train",
+#)
 
 train_dl = HuggingfaceDataLoader(
     dirpath="datasets/fineweb-edu/fineweb100B",
@@ -331,8 +331,8 @@ with mesh:
     try:
         while optimizer.step.value.item() < trconf.max_steps:
             step = optimizer.step.value.item()
-            dl = warmup_dl if step == 0 else train_dl
-            batch, target = dl()
+            #dl = warmup_dl if step == 0 else train_dl
+            batch, target = train_dl()
             batch = jax.device_put(batch.squeeze(), data_sharding)
             target = jax.device_put(target.squeeze(), data_sharding)
             avg_loss, logits_loss, load_balance_loss, z_loss = step_fn(
