@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import jax
 import flax.nnx as nnx
@@ -37,6 +37,7 @@ class Tiny_MoE_2_Config(Config):
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     moe_bias: bool = False # use bias in moe layers
+    moe_router_bias: bool = True # use bias in moe router
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
     use_qk_norm: bool = True  # apply RMSNorm to Q and K before RoPE
     use_squared_relu: bool = True  # use squared ReLU activation in MoE experts
@@ -99,7 +100,9 @@ class Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.moe = MOE(config, rngs)
+        if config.moe_router_bias is True:
+            moe_config = replace(config, mlp_bias=True)
+        self.moe = MOE(moe_config, rngs)
         self.aux_loss = False
 
     def __call__(self, x, mask=None):
