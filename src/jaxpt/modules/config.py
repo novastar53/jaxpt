@@ -7,3 +7,4 @@ class Config:
     name: str = "gpt"
     dtype: jnp.dtype = jnp.float32
     param_dtype: jnp.dtype = jnp.float32
+    zero_proj_init: bool = False  # use zeros for projection layer initialization

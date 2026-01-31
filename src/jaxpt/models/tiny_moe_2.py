@@ -21,6 +21,7 @@ class Tiny_MoE_2_Config(Config):
     name: str = "Tiny_MoE_2"
     dtype: jnp.dtype = jnp.bfloat16 # computation dype
     param_dtype: jnp.dtype = jnp.float32 # parameter dtype
+    zero_proj_init: bool = True  # use zeros for projection layer initialization (matches tiny_moe)
     block_size: int = 2048  # sequence length
     vocab_size: int = 50304  # 50257 padded to the nearest multiple of 64
     n_layer: int = 30  # number of attention blocks

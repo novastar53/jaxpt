@@ -16,10 +16,16 @@ class Experts(nnx.Module):
             nnx.initializers.normal(stddev=0.02),
             sharding=spec)
 
-        w_c_proj_init = nnx.with_partitioning(
-            nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
-            sharding=spec
-        )
+        if getattr(config, "zero_proj_init", False):
+            w_c_proj_init = nnx.with_partitioning(
+                nnx.initializers.zeros,
+                sharding=spec
+            )
+        else:
+            w_c_proj_init = nnx.with_partitioning(
+                nnx.initializers.normal(stddev=0.02 * (2 * config.n_layer) ** -0.5),
+                sharding=spec
+            )
 
         self.w_c_fc = nnx.Param(w_c_fc_init(rngs.default(),
             (

@@ -95,15 +95,22 @@ class CausalSelfAttention(SelfAttentionBase):
             param_dtype=config.param_dtype,
             rngs=rngs,
         )
-        self.c_proj = nnx.Linear(
-            config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.with_partitioning(
+        if getattr(config, "zero_proj_init", False):
+            c_proj_kernel_init = nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_c_proj_kernel_sharding", (None, "model")),
+            )
+        else:
+            c_proj_kernel_init = nnx.with_partitioning(
                 nnx.initializers.normal(
                     stddev=0.02 * (2 * config.n_layer) ** -0.5
                 ),
                 getattr(config, "attn_c_proj_kernel_sharding", (None, "model")),
-            ),
+            )
+        self.c_proj = nnx.Linear(
+            config.n_embed,
+            config.n_embed,
+            kernel_init=c_proj_kernel_init,
             bias_init=nnx.with_partitioning(
                 nnx.initializers.zeros,
                 getattr(config, "attn_c_proj_bias_sharding", ("model",)),
@@ -184,15 +191,22 @@ class GQ_Attention(SelfAttentionBase):
             param_dtype=config.param_dtype,
             rngs=rngs,
         )
-        self.wproj = nnx.Linear(
-            config.n_embed,
-            config.n_embed,
-            kernel_init=nnx.with_partitioning(
+        if getattr(config, "zero_proj_init", False):
+            wproj_kernel_init = nnx.with_partitioning(
+                nnx.initializers.zeros,
+                getattr(config, "attn_wproj_kernel_sharding", (None, "model")),
+            )
+        else:
+            wproj_kernel_init = nnx.with_partitioning(
                 nnx.initializers.normal(
                     stddev=config.init_stddev * (2 * config.n_layer) ** -0.5
                 ),
                 getattr(config, "attn_wproj_kernel_sharding", (None, "model")),
-            ),
+            )
+        self.wproj = nnx.Linear(
+            config.n_embed,
+            config.n_embed,
+            kernel_init=wproj_kernel_init,
             bias_init=nnx.with_partitioning(
                 nnx.initializers.zeros,
                 getattr(config, "attn_wproj_bias_sharding", ("model",)),
