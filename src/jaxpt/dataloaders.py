@@ -1,5 +1,6 @@
 from typing import Callable, List
 import os
+from pathlib import Path
 from abc import ABC, abstractmethod
 
 import jax
@@ -7,6 +8,30 @@ import numpy as np
 import jax.numpy as jnp
 
 import tiktoken
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Magic number for modded-nanogpt .bin format
+BIN_MAGIC_NUMBER = 20240520
+BIN_HEADER_SIZE = 256  # 256 int32 values = 1024 bytes
+
+
+def load_bin_shard(filepath: str | Path) -> np.ndarray:
+    """
+    Load a modded-nanogpt .bin shard file.
+
+    Format: 256 int32 header (1024 bytes) followed by uint16 tokens.
+    Header[0] = magic number (20240520), Header[2] = num_tokens.
+    """
+    filepath = Path(filepath)
+    with open(filepath, "rb") as f:
+        header = np.frombuffer(f.read(BIN_HEADER_SIZE * 4), dtype=np.int32)
+        assert header[0] == BIN_MAGIC_NUMBER, f"Invalid magic number: {header[0]}"
+        num_tokens = int(header[2])
+        tokens = np.frombuffer(f.read(num_tokens * 2), dtype=np.uint16)
+    return tokens
 
 
 class CharLoader:
@@ -65,7 +90,7 @@ class BaseDataLoader(ABC):
         self.shard_size = len(self.shard)
 
         if not quiet:
-            print(f"""{self.__class__.__name__} initialized:
+            logger.info(f"""{self.__class__.__name__} initialized:
 ------------------------
 label:          {label}
 shards:         {len(self.shards):,}
@@ -137,7 +162,7 @@ class DataLoader(BaseDataLoader):
         start_shard: int = 0,
         start_shard_pos: int = 0,
     ):
-        self.dirpath = dirpath
+        self.dirpath = os.path.abspath(dirpath)
         super().__init__(
             batch_size,
             block_size,
@@ -149,18 +174,28 @@ class DataLoader(BaseDataLoader):
         )
 
     def _list_shards(self, label):
+        if not os.path.exists(self.dirpath):
+            raise FileNotFoundError(f"Directory not found: {self.dirpath}")
         shards = os.listdir(self.dirpath)
+        logger.info(f"Found {len(shards)} files in {self.dirpath}")
         if label is not None:
             shards = [s for s in shards if label in s]
+            logger.info(f"After filtering with label '{label}': {len(shards)} shards")
         return shards
 
     def _load_shard(self):
         if self.cur_shard >= len(self.shards):
             self.cur_shard = 0
         shard = self.shards[self.cur_shard]
-        tokens = np.load(os.path.join(self.dirpath, shard))
-        if not isinstance(tokens, np.ndarray):
-            tokens = tokens["arr_0"]
+        shard_path = os.path.join(self.dirpath, shard)
+
+        if shard.endswith(".bin"):
+            tokens = load_bin_shard(shard_path)
+        else:
+            tokens = np.load(shard_path)
+            if not isinstance(tokens, np.ndarray):
+                tokens = tokens["arr_0"]
+
         self.shard_size = len(tokens)
         return tokens
 
@@ -212,9 +247,21 @@ class CloudDataLoader(BaseDataLoader):
         shard_name = self.shards[self.cur_shard]
         blob = self.bucket.blob(shard_name)
         data = blob.download_as_bytes()
-        tokens = np.load(BytesIO(data))
-        if not isinstance(tokens, np.ndarray):
-            tokens = tokens["arr_0"]
+
+        if shard_name.endswith(".bin"):
+            # Parse modded-nanogpt .bin format from bytes
+            header = np.frombuffer(data[: BIN_HEADER_SIZE * 4], dtype=np.int32)
+            assert header[0] == BIN_MAGIC_NUMBER, f"Invalid magic number: {header[0]}"
+            num_tokens = int(header[2])
+            tokens = np.frombuffer(
+                data[BIN_HEADER_SIZE * 4 : BIN_HEADER_SIZE * 4 + num_tokens * 2],
+                dtype=np.uint16,
+            )
+        else:
+            tokens = np.load(BytesIO(data))
+            if not isinstance(tokens, np.ndarray):
+                tokens = tokens["arr_0"]
+
         self.shard_size = len(tokens)
         return tokens
 
@@ -237,7 +284,7 @@ class BlendedCloudDataLoader():
         self.T = block_size
         self.D = device_rank
         batch_sizes = self._calc_batch_sizes(batch_size, proportions)
-        print(f"Initializing blended dataset with batch sizes: {batch_sizes}")
+        logger.info(f"Initializing blended dataset with batch sizes: {batch_sizes}")
         self.dataloaders = []
         n = len(bucket_names)
         # Default to zeros if not provided
@@ -289,6 +336,107 @@ class BlendedCloudDataLoader():
 
 
 class HuggingfaceDataLoader(BaseDataLoader):
+    """
+    DataLoader for Huggingface hosted datasets with modded-nanogpt .bin format.
+    Downloads shards on-demand from HuggingFace Hub.
+    """
+
+    def __init__(
+        self,
+        dirpath: str,
+        batch_size: int,
+        block_size: int,
+        device_rank: int,
+        label: str | None = None,
+        quiet: bool = False,
+        start_shard: int = 0,
+        start_shard_pos: int = 0,
+        hf_repo: str = "kjj0/fineweb100B-gpt2",
+        num_train_shards: int | None = None,
+        download: bool = True,
+    ):
+        """
+        Args:
+            dirpath: Local directory for .bin files
+            batch_size: Batch size
+            block_size: Sequence length
+            device_rank: Number of devices for data parallelism
+            label: Filter shards by label ('train' or 'val')
+            quiet: Suppress logging
+            start_shard: Starting shard index
+            start_shard_pos: Starting position within shard
+            hf_repo: HuggingFace repo ID for downloading
+            num_train_shards: Limit number of train shards (None = all 1030)
+            download: If True, download missing shards from HuggingFace
+        """
+        self.dirpath = Path(dirpath)
+        self.dirpath.mkdir(parents=True, exist_ok=True)
+        self.hf_repo = hf_repo
+        self.num_train_shards = num_train_shards
+        self.download = download
+        super().__init__(
+            batch_size,
+            block_size,
+            device_rank,
+            label,
+            quiet,
+            start_shard=start_shard,
+            start_shard_pos=start_shard_pos,
+        )
+
+    def _list_shards(self, label: str | None) -> list[str]:
+        """Generate list of shard filenames based on label."""
+        shards = []
+
+        if label is None or label == "val":
+            shards.append("fineweb_val_000000.bin")
+
+        if label is None or label == "train":
+            max_train = self.num_train_shards if self.num_train_shards else 1030
+            for i in range(1, max_train + 1):
+                shards.append(f"fineweb_train_{i:06d}.bin")
+
+        logger.info(f"HuggingfaceDataLoader: {len(shards)} shards ({label or 'all'})")
+        return shards
+
+    def _get_shard_path(self, shard_name: str) -> Path:
+        """Get local path for shard, downloading from HuggingFace if needed."""
+        local_path = self.dirpath / shard_name
+
+        if not local_path.exists() and self.download:
+            logger.info(f"Downloading {shard_name} from {self.hf_repo}...")
+            try:
+                from huggingface_hub import hf_hub_download
+
+                hf_hub_download(
+                    repo_id=self.hf_repo,
+                    filename=shard_name,
+                    repo_type="dataset",
+                    local_dir=self.dirpath,
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to download {shard_name}: {e}")
+
+        return local_path
+
+    def _load_shard(self) -> np.ndarray:
+        """Load current shard, wrapping around if needed."""
+        if self.cur_shard >= len(self.shards):
+            self.cur_shard = 0
+
+        shard_name = self.shards[self.cur_shard]
+        shard_path = self._get_shard_path(shard_name)
+        tokens = load_bin_shard(shard_path)
+        self.shard_size = len(tokens)
+        return tokens
+
+
+class StreamingHuggingfaceDataLoader(BaseDataLoader):
+    """
+    Streaming DataLoader for Huggingface datasets.
+    Uses the streaming API to load data without downloading entire dataset.
+    """
+
     def __init__(
         self,
         batch_size: int,
@@ -309,7 +457,7 @@ class HuggingfaceDataLoader(BaseDataLoader):
         from datasets import load_dataset, interleave_datasets
         from transformers import AutoTokenizer
 
-        print(f"Initializing tokenizer {tokenizer}")
+        logger.info(f"Initializing tokenizer {tokenizer}")
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
 
         self.dataset_objs = []
@@ -323,7 +471,7 @@ class HuggingfaceDataLoader(BaseDataLoader):
         self.ds = ds.shuffle(buffer_size=buffer_size, seed=random_seed)
         self.iter_ds = iter(self.ds)
 
-        # Always set start_shard and start_shard_pos to 0 for HuggingfaceDataLoader
+        # Always set start_shard and start_shard_pos to 0 for streaming loader
         super().__init__(
             batch_size,
             block_size,
@@ -355,7 +503,7 @@ class HuggingfaceDataLoader(BaseDataLoader):
 
         tokens = self.tokenizer.encode(example["text"])
         self.shard_size = len(tokens)
-        return np.array(tokens)  # , dtype=jnp.uint16)
+        return np.array(tokens)
 
 
 class SFT_CloudDataLoader:

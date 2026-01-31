@@ -25,19 +25,21 @@ class Tiny_MoE_2_Config(Config):
     n_layer: int = 30  # number of attention blocks
     n_head: int = 12  # number of attention heads
     n_kv_head: int = 4  # number of key-value heads
-    n_embed: int = 672  # number token embedding dimensionsa
+    n_embed: int = 672  # number token embedding dimensions
     n_experts: int = 8  # number of experts
     mesh: jax.sharding.Mesh | None = None  # device mesh
     top_k: int = 2  # number of top experts to use
     load_factor: float = 1.25 # load factor for expert buffers
-    expert_weight_priority: bool = False # sort expert buffer assignments by expert weight 
+    expert_weight_priority: bool = False # sort expert buffer assignments by expert weight
     load_balance_loss_coeff: float = 1e-2  # moe auxiliary loss coefficient
-    z_loss_coeff: float = 1e-4 # moe z loss coefficient
+    z_loss_coeff: float = 5e-4 # moe z loss coefficient
     n_mlp_hidden: int = 2048  # number of hidden dimensions
     mlp_bias: bool = False  # use bias in mlp layers
     attention_bias: bool = False  # use bias in attention layers
     moe_bias: bool = False # use bias in moe layers
     ln_epsilon: float = 1e-5  # constant to prevent division by zero
+    use_qk_norm: bool = True  # apply RMSNorm to Q and K before RoPE
+    use_squared_relu: bool = True  # use squared ReLU activation in MoE experts
     glu_activation: Literal["sigmoid", "gelu", "silu"] = "silu"
     sdpa_implementation: Literal["xla", "cudnn"] = (
         "xla"  # self-attention kernel implementation
@@ -81,7 +83,12 @@ class Block(nnx.Module):
             ),
             rngs=rngs,
         )
-        self.attn = GQ_Attention_w_RoPE(config, rope_omega=rope_omega, rngs=rngs)
+        self.attn = GQ_Attention_w_RoPE(
+            config,
+            rope_omega=rope_omega,
+            rngs=rngs,
+            use_qk_norm=getattr(config, "use_qk_norm", False),
+        )
         self.rms_n_2 = nnx.RMSNorm(
             config.n_embed,
             epsilon=config.ln_epsilon,

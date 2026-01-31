@@ -159,14 +159,15 @@ This project includes a variety of transformer-based language models with differ
 #### **Tiny_MoE_2**
 - **Precision**: bfloat16 (computation), float32 (parameters)
 - **Sharding**: Manual partition specs for MoE components
-- **Attention**: GQ_Attention_w_RoPE (12 query, 4 KV heads)
+- **Attention**: GQ_Attention_w_RoPE (12 query, 4 KV heads) with QK-Norm
 - **Architecture**: Fully MoE (all layers use MoE, no GLU blocks)
 - **MoE Configuration**: 8 experts, top-k=2, load factor=1.25
-- **Activation**: SiLU
+- **Activation**: Squared ReLU (ReGLU²)
 - **Normalization**: RMSNorm (epsilon 1e-5)
-- **Losses**: Load balancing (1e-2) + Z-loss (1e-4)
+- **Losses**: Load balancing (1e-2) + Z-loss (5e-4)
 - **Routing**: No expert weight priority
 - **Positional**: RoPE with theta=1e-4
+- **Special**: QK-Norm applied to queries and keys before RoPE
 
 #### **Tiny_MoE_3**
 - **Precision**: bfloat16 (computation), float32 (parameters)
@@ -219,7 +220,8 @@ This project includes a variety of transformer-based language models with differ
 - Multiple precision modes (float32, bfloat16, mixed precision)
 - Various sharding strategies (manual FSDP-like, device mesh, data/model parallel)
 - Advanced attention mechanisms (causal, grouped query, RoPE-enhanced, flash attention)
-- Multiple activation functions (GELU, SiLU, Sigmoid, ReLU)
+- Optional QK-Norm for attention layers
+- Multiple activation functions (GELU, SiLU, Sigmoid, ReLU, Squared ReLU)
 - Different normalization approaches (LayerNorm, RMSNorm)
 - KV caching for efficient inference
 - Comprehensive checkpoint management

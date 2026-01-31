@@ -254,9 +254,34 @@ class GQ_Attention(SelfAttentionBase):
 
 
 class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
-    def __init__(self, config: Config, rope_omega: nnx.Variable, rngs: nnx.Rngs):
+    def __init__(
+        self,
+        config: Config,
+        rope_omega: nnx.Variable,
+        rngs: nnx.Rngs,
+        use_qk_norm: bool = False,
+    ):
         GQ_Attention.__init__(self, config, rngs)
         RoPE_Llama.__init__(self, omega=rope_omega)
+        self.use_qk_norm = use_qk_norm
+        if use_qk_norm:
+            head_dim = config.n_embed // config.n_head
+            self.q_norm = nnx.RMSNorm(
+                head_dim,
+                epsilon=config.ln_epsilon,
+                scale_init=nnx.with_partitioning(nnx.initializers.ones, (None,)),
+                dtype=config.dtype,
+                param_dtype=config.param_dtype,
+                rngs=rngs,
+            )
+            self.k_norm = nnx.RMSNorm(
+                head_dim,
+                epsilon=config.ln_epsilon,
+                scale_init=nnx.with_partitioning(nnx.initializers.ones, (None,)),
+                dtype=config.dtype,
+                param_dtype=config.param_dtype,
+                rngs=rngs,
+            )
 
     def __call__(self, x, mask=None):
         B, x_T, C = x.shape
@@ -270,6 +295,11 @@ class GQ_Attention_w_RoPE(GQ_Attention, RoPE_Llama):
         q = q.reshape((B, x_T, self.n_head, head_dim))
         k = k.reshape((B, x_T, self.n_kv_head, head_dim))
         v = v.reshape((B, x_T, self.n_kv_head, head_dim))
+
+        # Apply QK-norm before RoPE if enabled
+        if self.use_qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
 
         if self.config.use_cache is True and self.key_cache is not None:
             cache_len = self.key_cache.shape[1]

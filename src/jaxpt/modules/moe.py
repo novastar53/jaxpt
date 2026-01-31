@@ -13,6 +13,7 @@ spec = PartitionSpec("devices",)
 class Experts(nnx.Module):
     def __init__(self, config, rngs):
         self.config = config
+        self.use_squared_relu = getattr(config, "use_squared_relu", False)
 
         w_c_fc_init = nnx.with_partitioning(
             nnx.initializers.normal(stddev=0.02),
@@ -97,8 +98,11 @@ class Experts(nnx.Module):
         g = jnp.einsum('eti,eih->eth', x, w_gate)
         if self.config.moe_bias:
             g += b_gate
-        g = nnx.silu(g)
-        h = g * h
+        # Apply activation: squared ReLU or SiLU (default)
+        if self.use_squared_relu:
+            h = (nnx.relu(g) ** 2) * h
+        else:
+            h = nnx.silu(g) * h
         o = jnp.einsum('eth,eho->eto', h, w_c_proj)
         if self.config.moe_bias:
             o += b_c_proj
