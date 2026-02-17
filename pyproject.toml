@@ -12,7 +12,7 @@ dependencies = [
     "google-cloud-storage>=3.1.0",
     "english-words>=2.0.1",
     "flash-attention-jax>=0.3.1",
-    "numpy==1.26.4",
+    "numpy>=2.3.3",
     "more-itertools>=10.7.0",
     "orbax>=0.1.9",
 ]
